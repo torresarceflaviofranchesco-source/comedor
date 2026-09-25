@@ -2,16 +2,20 @@
 // • Hoja "Menú": se programa el menú de toda la semana (Fecha · Servicio · Plato · Stock).
 // • Panel (J:L): horario de cada servicio. Cada uno abre y cierra solo.
 // • Hoja "Precios": opciones por servicio y modalidad (Local / Recojo).
+// • Hoja "Platos": ingredientes, kcal, proteínas y grasas de cada plato (se llena una vez por plato).
 // • HTML "index": consulta por fecha; pedidos de hoy dentro del horario de cada servicio.
 // • Un pedido por persona por servicio por día. Para anular: "Anulado" en la columna Estado de "Pedidos".
 
 const HOJA_MENU = 'Menú';
 const HOJA_PRECIOS = 'Precios';
 const HOJA_PEDIDOS = 'Pedidos';
+const HOJA_PLATOS = 'Platos';                   // Ingredientes y valores nutricionales de cada plato
 const MAX_POR_PERSONA = 10;          // máximo por opción en un pedido
 const FILAS_MENU = 300;              // filas disponibles para programar el menú
 const AZUL = '#1f3864', AZUL_CLARO = '#dde5f3', GRIS = '#f3f3f3', AMARILLO = '#fffbea';
-const PERSONAL_DEFECTO = ['SPCC', 'Funcionario', 'Empleado'];
+const PERSONAL_DEFECTO = ['SPCC', 'Funcionario', 'Empleado', 'Contratista'];
+const COMEDOR = 'Staff Ilo';                    // Casilla marcada en el vale: 'Staff Ilo' u 'Hospital'
+const CARPETA_VALES = 'Vales de consumo';       // Carpeta (junto a la hoja) donde se guarda cada vale en PDF
 const SERVICIOS_DEF = [['Desayuno', 5, 7], ['Almuerzo', 9, 11], ['Cena', 16, 18]];
 // Servicio, opción, precio con IGV, modalidad, activo. Vacío = pendiente de confirmar.
 const PRECIOS_DEF = [
@@ -28,21 +32,27 @@ const PRECIOS_DEF = [
   ['Cena', 'Completo', 11.9, 'Recojo', 'Sí'],
   ['Cena', 'Económico', 10.3, 'Recojo', 'Sí'],
   ['Cena', 'Solo segundo', '', 'Local', 'No'],
-  ['Cena', 'Solo segundo', '', 'Recojo', 'No']
+  ['Cena', 'Solo segundo', '', 'Recojo', 'No'],
+  ['Rancho caliente', 'Completo', 13.2, 'Local', 'Sí']
 ];
 const CAB_PED = ['Fecha y hora', 'Código', 'Fecha consumo', 'Servicio', 'Nombre completo', 'Tipo de personal',
-  'Registro / DNI', 'Plato', 'Opción', 'Cantidad', 'Precio unit.', 'Subtotal', 'Descuento planilla', 'Observaciones', 'Estado', 'Modalidad', 'Solicitud ID'];
+  'Registro / DNI', 'Plato', 'Opción', 'Cantidad', 'Precio unit.', 'Subtotal', 'Descuento planilla', 'Observaciones', 'Estado', 'Modalidad', 'Solicitud ID',
+  'Correo', 'Empresa', 'Dpto. / Área', 'Vale PDF', 'Método de pago'];
+const METODOS_PAGO = ['Efectivo', 'Yape', 'Plin', 'Tarjeta'];   // Se pide cuando NO es descuento por planilla
+const COL_CORREO = 18, COL_VALE = 21;           // columnas "Correo" y "Vale PDF" en Pedidos
+const MAX_COPIAS = 5;                           // copias por correo que se pueden pedir de un mismo vale
 
 // Panel de control en la hoja Menú (columnas J:L)
 const P = {
-  LINK: 'K2', SRV_INI: 4, SRV_FIN: 8, VENTA: 'K9', ESTADO: 'K10',
-  REP_FILA: 13, REP_MSG: 'J16', REP_LINK: 'J17'
+  LINK: 'K2', SRV_INI: 4, SRV_FIN: 8, VENTA: 'K9', ESTADO: 'K10', CARPETA: 'K12'
 };
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('🍽️ Comedor')
-    .addItem('📄 Reporte para mozos (PDF)', 'reporteAMozos_')
+    .addItem('📂 Abrir carpeta de vales (PDF)', 'abrirCarpetaVales_')
     .addItem('🔗 Ver link de pedidos', 'verLink_')
+    .addItem('🥗 Agregar platos nuevos a "Platos"', 'agregarPlatos_')
+    .addItem('🧪 Cargar menú de ejemplo (21–27/09)', 'cargarMenuEjemplo')
     .addSeparator()
     .addItem('Recalcular pedidos ahora', 'actualizarStock_')
     .addItem('Reparar diseño y activadores', 'configurarTodo_')
@@ -53,7 +63,7 @@ function onOpen() {
 function ss_() {
   const id = PropertiesService.getScriptProperties().getProperty('COMEDOR_SS_ID');
   const ss = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActive();
-  if (!ss) throw new Error('Primero ejecuta configurarTodo_ desde la hoja de cálculo.');
+  if (!ss) throw new Error('Primero ejecuta configurarTodo desde Extensiones → Apps Script de la hoja de cálculo.');
   return ss;
 }
 let TZ = null;
@@ -121,20 +131,22 @@ function doGet() {
 function datosFormulario(fecha) {
   const actual = hoyKey_(), hoy = fecha ? fechaKey_(fecha) : actual, ahora = minutosAhora_();
   if (!hoy) throw new Error('Fecha no válida.');
-  const opciones = leerOpciones_();
-  const menuHoy = unicos_(leerMenuTodo_().filter(m => m.fecha === hoy));
+  const opciones = leerOpciones_(), menu = leerMenuTodo_(), servs = leerServicios_(), fichas = leerPlatos_();
+  const menuHoy = unicos_(menu.filter(m => m.fecha === hoy));
   const usados = usados_(leerLineas_(hoy, false));
 
-  const servicios = leerServicios_().map(s => {
+  const servicios = servs.map(s => {
     const platos = menuHoy.filter(m => m.sKey === s.key).map(m => {
       const u = usados[claveUso_(hoy, s.key, m.plato)] || 0;
-      return { plato: m.plato, stock: m.stock, quedan: m.stock == null ? null : Math.max(0, m.stock - u) };
+      const f = fichas[keyS_(m.plato)] || {};
+      return { plato: m.plato, stock: m.stock, quedan: m.stock == null ? null : Math.max(0, m.stock - u),
+        ingredientes: f.ingredientes || '', kcal: f.kcal, proteinas: f.proteinas, grasas: f.grasas };
     });
     const ops = opciones[s.key] || [];
     const estado = ahora < s.abre ? 'pronto' : (ahora < s.cierra ? 'abierto' : 'cerrado');
     let motivo = '';
     if (!platos.length) motivo = 'Sin menú programado';
-    else if (!ops.length) motivo = 'Sin precios';
+    else if (!ops.length) motivo = 'Precios por confirmar';
     else if (!platos.some(p => p.quedan == null || p.quedan > 0)) motivo = 'Agotado';
     return {
       nombre: s.nombre, key: s.key, abre: hhmm_(s.abre), cierra: hhmm_(s.cierra),
@@ -143,14 +155,61 @@ function datosFormulario(fecha) {
     };
   });
 
-  return { fecha: hoy.split('-').reverse().join('/'), fechaKey: hoy, hoy: actual,
-    fechas: Array.from(new Set([actual,hoy].concat(leerMenuTodo_().map(m => m.fecha).filter(f => f >= actual)))).sort(),
-    servicios: servicios, personal: leerPersonal_(), max: MAX_POR_PERSONA };
+  // Menú programado de los próximos días (solo consulta)
+  const semana = Array.from(new Set(menu.map(m => m.fecha).filter(f => f >= actual))).sort().slice(0, 7).map(f => {
+    const delDia = unicos_(menu.filter(m => m.fecha === f));
+    return { fecha: f, servicios: servs.map(s => ({ nombre: s.nombre,
+      platos: delDia.filter(m => m.sKey === s.key).map(m => m.plato) })).filter(s => s.platos.length) };
+  }).filter(d => d.servicios.length);
+
+  return { fecha: hoy.split('-').reverse().join('/'), fechaKey: hoy, hoy: actual, ahora: ahora,
+    semana: semana, servicios: servicios, personal: leerPersonal_(), pagos: METODOS_PAGO, max: MAX_POR_PERSONA };
 }
 
 // Recibe el pedido, valida todo con bloqueo y lo guarda
+// Registra el pedido y guarda su vale en PDF en Drive (copia del administrador).
 function enviarPedido(p) {
   p = p || {};
+  const firma = String(p.firma || '');
+  if (!/^data:image\/png;base64,[A-Za-z0-9+\/=]+$/.test(firma) || firma.length > 300000) throw new Error('Firma tu vale antes de enviar.');
+  const v = registrarPedido_(p);
+  v.firma = firma;
+  try { guardarVale_(v); } catch (e) { Logger.log('Vale ' + v.codigo + ': ' + e); }
+  return { codigo: v.codigo, servicio: v.servicio, modalidad: v.modalidad, hora: v.hora, nombre: v.nombre,
+    registro: v.registro, items: v.items, total: v.total };
+}
+
+// Lo llama la pantalla final: envía una copia del vale al correo que escriba el trabajador.
+function enviarCopiaVale(p) {
+  p = p || {};
+  const solicitud = String(p.solicitud || ''), correo = limpiar_(p.correo, 120).toLowerCase();
+  if (!/^[a-zA-Z0-9-]{16,80}$/.test(solicitud)) throw new Error('No se encontró tu pedido. Pide tu vale en el comedor.');
+  if (!correoValido_(correo)) throw new Error('Escribe un correo válido.');
+  let lineas = leerLineas_(hoyKey_(), false).filter(l => l.solicitud === solicitud);
+  if (!lineas.length) lineas = leerLineas_(null, false).filter(l => l.solicitud === solicitud);
+  if (!lineas.length) throw new Error('No se encontró tu pedido. Pide tu vale en el comedor.');
+  const cache = CacheService.getScriptCache(), clave = 'copias-' + solicitud, n = Number(cache.get(clave) || 0);
+  if (n >= MAX_COPIAS) throw new Error('Ya se enviaron ' + MAX_COPIAS + ' copias de este vale.');
+  if (MailApp.getRemainingDailyQuota() < 1) throw new Error('Hoy ya no se pueden enviar más correos. Pide tu vale en el comedor.');
+
+  const v = comprobante_(lineas);
+  const id = (v.vale.match(/\/d\/([-\w]+)/) || [])[1];
+  let pdf = null;
+  if (id) try { pdf = DriveApp.getFileById(id).getBlob(); } catch (e) { Logger.log(e); }
+  if (!pdf) pdf = guardarVale_(v) || valePdf_(v);
+  correoVale_(v, correo, pdf);
+  cache.put(clave, String(n + 1), 21600);
+
+  const lista = v.correo.split(/,\s*/).filter(String);
+  if (lista.indexOf(correo) < 0) lista.push(correo);
+  const sh = hojaPedidos_();
+  v.filas.forEach(f => sh.getRange(f, COL_CORREO).setValue(lista.join(', ')));
+  return { correo: correo };
+}
+
+function correoValido_(c) { return /^[^\s@']+@[^\s@]+\.[^\s@]{2,}$/.test(c); }
+
+function registrarPedido_(p) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) throw new Error('Hay muchos pedidos a la vez. Intenta de nuevo en unos segundos.');
   try {
@@ -159,11 +218,14 @@ function enviarPedido(p) {
     const personal = String(p.personal || '');
     const descuento = p.descuento === 'No' ? 'No' : (p.descuento === 'Sí' ? 'Sí' : '');
     const obs = limpiar_(p.obs, 200);
+    const empresa = limpiar_(p.empresa, 60), area = limpiar_(p.area, 60);
 
     if (nombre.split(/\s+/).length < 2 || nombre.length < 5) throw new Error('Escribe tu nombre completo.');
     if (!/^[A-Z0-9][A-Z0-9 .-]{3,19}$/.test(registro)) throw new Error('Escribe tu Registro o DNI.');
     if (leerPersonal_().indexOf(personal) < 0) throw new Error('Elige tu tipo de personal.');
     if (!descuento) throw new Error('Indica si el consumo es con descuento por planilla.');
+    const pago = descuento === 'No' ? String(p.pago || '') : '';
+    if (descuento === 'No' && METODOS_PAGO.indexOf(pago) < 0) throw new Error('Elige cómo vas a pagar.');
 
     const s = leerServicios_().filter(x => x.key === keyS_(p.servicio))[0];
     if (!s) throw new Error('Elige un servicio.');
@@ -223,19 +285,17 @@ function enviarPedido(p) {
 
     const fechaHora = new Date(), fTxt = hoyTxt_();
     const filas = items.map(i => [fechaHora, codigo, fTxt, s.nombre, nombre, personal, registro, i.plato, i.tipo, i.cant,
-      precio[i.tipo], Math.round(i.cant * precio[i.tipo] * 100) / 100, descuento, obs, '', modalidad, solicitud]);
-    const sh = hojaPedidos_();
-    sh.getRange(sh.getLastRow() + 1, 1, filas.length, CAB_PED.length).setValues(filas);
+      precio[i.tipo], Math.round(i.cant * precio[i.tipo] * 100) / 100, descuento, obs, '', modalidad, solicitud,
+      '', empresa, area, '', pago]);
+    const sh = hojaPedidos_(), fila = sh.getLastRow() + 1;
+    sh.getRange(fila, 1, filas.length, CAB_PED.length).setValues(filas);
     SpreadsheetApp.flush();
     try { actualizarPanel_(); } catch (e) { Logger.log(e); }
 
-    return {
-      codigo: codigo, servicio: s.nombre, modalidad: modalidad,
-      hora: Utilities.formatDate(fechaHora, tz_(), 'dd/MM/yyyy HH:mm'),
-      nombre: nombre, registro: registro,
-      items: items.map(i => ({ plato: i.plato, tipo: i.tipo, cant: i.cant, subtotal: i.cant * precio[i.tipo] })),
-      total: Math.round(items.reduce((a, i) => a + i.cant * precio[i.tipo], 0) * 100) / 100
-    };
+    return comprobante_(items.map((i, n) => ({ hora: fechaHora, codigo: codigo, fecha: hoy, servicio: s.nombre, sKey: s.key,
+      nombre: nombre, personal: personal, registro: registro, plato: i.plato, tipo: i.tipo, cant: i.cant, precio: precio[i.tipo],
+      descuento: descuento, obs: obs, modalidad: modalidad, solicitud: solicitud, correo: '', empresa: empresa, area: area, pago: pago,
+      vale: '', fila: fila + n })));
   } finally {
     lock.releaseLock();
   }
@@ -244,7 +304,7 @@ function enviarPedido(p) {
 // ---------------------------------------------------------------- Lectura de hojas
 function hojaMenu_() {
   const ss = ss_();
-  return ss.getSheetByName(HOJA_MENU) || ss.insertSheet(HOJA_MENU, 0);
+  return hoja_(HOJA_MENU) || ss.insertSheet(HOJA_MENU, 0);
 }
 
 function leerServicios_() {
@@ -278,9 +338,16 @@ function unicos_(menu) {
   });
 }
 
+// Busca una hoja sin distinguir mayúsculas, tildes ni espacios ("PRECIOS", "Precios ").
+function hoja_(nombre) {
+  const ss = ss_(), k = keyS_(nombre).replace(/\s+/g, '');
+  return ss.getSheetByName(nombre) || ss.getSheets().filter(h => keyS_(h.getName()).replace(/\s+/g, '') === k)[0] || null;
+}
+
 function hojaPrecios_() {
-  const sh = ss_().getSheetByName(HOJA_PRECIOS);
-  if (!sh) throw new Error('Ejecuta configurarTodo_ antes de abrir el formulario.');
+  let sh = hoja_(HOJA_PRECIOS);
+  if (!sh) { configurarPrecios_(); sh = hoja_(HOJA_PRECIOS); }   // Si falta, se crea con los precios por defecto
+  if (!sh) throw new Error('No se encontró la hoja "Precios" en "' + ss_().getName() + '". Ejecuta configurarTodo desde esa hoja.');
   return sh;
 }
 
@@ -292,8 +359,9 @@ function opcionBase_(tipo) {
 
 function configurarPrecios_() {
   const ss = ss_();
-  let sh = ss.getSheetByName(HOJA_PRECIOS);
+  let sh = hoja_(HOJA_PRECIOS);
   if (!sh) sh = ss.insertSheet(HOJA_PRECIOS);
+  else if (sh.getName() !== HOJA_PRECIOS) sh.setName(HOJA_PRECIOS);
   if (sh.getLastRow() && String(sh.getRange('A1').getValue()).trim() !== 'Servicio') {
     // Conserva íntegra cualquier estructura más antigua.
     let name = 'Precios (anterior)', i = 2;
@@ -328,15 +396,76 @@ function leerOpciones_() {
   const sh = hojaPrecios_(), n = sh.getLastRow()-1, o = Object.create(null), vistos = new Set();
   if (n < 1) return o;
   sh.getRange(2,1,n,7).getValues().forEach(r => {
-    const k = keyS_(r[0]), tipo = String(r[1]).trim(), modalidad = String(r[3]).trim();
-    if (!k || !tipo || keyS_(r[5]) !== 'si' || !['Local','Recojo'].includes(modalidad)) return;
-    if (r[2] === '' || typeof r[2] !== 'number' || !Number.isFinite(r[2]) || r[2] < 0) return;
-    const id = JSON.stringify([k,modalidad,tipo]);
+    const k = keyS_(r[0]), tipo = String(r[1]).trim(), modalidad = modalidad_(r[3]), precio = precio_(r[2]);
+    if (!k || !tipo || !activo_(r[5]) || !modalidad || precio === null) return;
+    const id = JSON.stringify([k,modalidad,keyS_(tipo)]);
     if (vistos.has(id)) throw new Error('Opción duplicada en Precios: ' + r[0] + ' / ' + modalidad + ' / ' + tipo);
     vistos.add(id);
-    (o[k] = o[k] || []).push({tipo:tipo,modalidad:modalidad,precio:Math.round(r[2]*100)/100,incluye:String(r[6] || '')});
+    (o[k] = o[k] || []).push({tipo:tipo,modalidad:modalidad,precio:precio,incluye:String(r[6] || '')});
   });
   return o;
+}
+
+// Tolera precios escritos como texto ("S/ 10,50"), modalidad en minúsculas y Activo como casilla.
+function precio_(v) {
+  if (typeof v === 'string') {
+    const t = v.replace(/s\/|\s/gi, '');
+    v = /^\d+(,\d{1,2})?$/.test(t) ? Number(t.replace(',', '.')) : (/^\d+(\.\d+)?$/.test(t) ? Number(t) : NaN);
+  }
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v * 100) / 100 : null;
+}
+function modalidad_(v) {
+  const k = keyS_(v);
+  return k === 'local' ? 'Local' : (k === 'recojo' || k.includes('llevar')) ? 'Recojo' : '';
+}
+function activo_(v) { return v === true || ['si', 'true', 'x'].includes(keyS_(v)); }
+
+// ---------------------------------------------------------------- Hoja Platos (ficha nutricional)
+const CAB_PLATOS = ['Plato', 'Ingredientes / acompañamiento', 'Kcal', 'Proteínas (g)', 'Grasas (g)'];
+
+function hojaPlatos_() {
+  const ss = ss_();
+  let sh = hoja_(HOJA_PLATOS);
+  if (sh) return sh;
+  sh = ss.insertSheet(HOJA_PLATOS);
+  sh.getRange(1, 1, 1, CAB_PLATOS.length).setValues([CAB_PLATOS]).setFontWeight('bold')
+    .setBackground(AZUL).setFontColor('#ffffff').setWrap(true).setVerticalAlignment('middle');
+  sh.setFrozenRows(1);
+  [230, 380, 70, 100, 90].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  sh.getRange('B2:B').setWrap(true);
+  sh.getRange('C2:E').setHorizontalAlignment('center').setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireNumberGreaterThanOrEqualTo(0).setHelpText('Número por porción (ej. 520). Déjalo vacío si no lo sabes.').setAllowInvalid(false).build());
+  sh.getRange('A1').setNote('Los platos del menú se agregan solos. Completa ingredientes y valores por porción: se muestran en el formulario. Lo que quede vacío no se muestra.');
+  return sh;
+}
+
+// Clave del plato → ficha. Se busca sin distinguir mayúsculas ni tildes.
+function leerPlatos_() {
+  const sh = hoja_(HOJA_PLATOS), out = Object.create(null);
+  if (!sh || sh.getLastRow() < 2) return out;
+  const num = v => (v === '' || v == null || !Number.isFinite(Number(v))) ? null : Math.round(Number(v));
+  sh.getRange(2, 1, sh.getLastRow() - 1, CAB_PLATOS.length).getValues().forEach(r => {
+    const k = keyS_(r[0]);
+    if (k) out[k] = { ingredientes: String(r[1] || '').trim(), kcal: num(r[2]), proteinas: num(r[3]), grasas: num(r[4]) };
+  });
+  return out;
+}
+
+// Agrega a "Platos" los platos del menú que aún no están.
+function sincronizarPlatos_() {
+  const sh = hojaPlatos_(), existentes = leerPlatos_(), nuevos = [];
+  leerMenuTodo_().forEach(m => {
+    const k = keyS_(m.plato);
+    if (!(k in existentes)) { existentes[k] = {}; nuevos.push([m.plato]); }
+  });
+  if (nuevos.length) sh.getRange(sh.getLastRow() + 1, 1, nuevos.length, 1).setValues(nuevos);
+  return nuevos.length;
+}
+
+function agregarPlatos_() {
+  const n = sincronizarPlatos_();
+  ss_().setActiveSheet(hojaPlatos_());
+  aviso_(n ? '✅ Se agregaron ' + n + ' platos a la hoja "Platos". Completa sus ingredientes y valores.' : 'La hoja "Platos" ya tiene todos los platos del menú.');
 }
 
 function leerPersonal_() {
@@ -348,7 +477,7 @@ function leerPersonal_() {
 
 function hojaPedidos_() {
   const ss = ss_();
-  let sh = ss.getSheetByName(HOJA_PEDIDOS);
+  let sh = hoja_(HOJA_PEDIDOS);
   if (sh && String(sh.getRange(1, 3).getValue()) !== CAB_PED[2]) {
     // Formato anterior: se guarda aparte y se crea la hoja nueva
     let nombre = 'Pedidos (anterior)', i = 2;
@@ -368,7 +497,9 @@ function hojaPedidos_() {
     sh.setColumnWidth(5, 220); sh.setColumnWidth(8, 200); sh.setColumnWidth(9, 220);
     sh.getRange('O1').setNote('Escribe "Anulado" en esta columna para anular una línea: el stock se devuelve.');
   }
-  sh.getRange(1,16,1,2).setValues([['Modalidad','Solicitud ID']]);
+  if (String(sh.getRange(1, CAB_PED.length).getValue()) !== CAB_PED[CAB_PED.length - 1])
+    sh.getRange(1, 16, 1, CAB_PED.length - 15).setValues([CAB_PED.slice(15)]).setFontWeight('bold')
+      .setBackground(AZUL).setFontColor('#ffffff').setWrap(true).setVerticalAlignment('middle');
   return sh;
 }
 
@@ -377,20 +508,22 @@ function leerLineas_(fecha, incluirAnulados) {
   const sh = hojaPedidos_();
   const n = sh.getLastRow() - 1;
   if (n < 1) return [];
-  return sh.getRange(2, 1, n, CAB_PED.length).getValues().map(r => ({
+  return sh.getRange(2, 1, n, CAB_PED.length).getValues().map((r, i) => ({
     hora: r[0], codigo: String(r[1]), fecha: fechaKey_(r[2]), servicio: String(r[3]), sKey: keyS_(r[3]),
     nombre: String(r[4]), personal: String(r[5]), registro: String(r[6]), plato: String(r[7]), tipo: String(r[8]),
     cant: Number(r[9]) || 0, precio: Number(r[10]) || 0, descuento: String(r[12]), obs: String(r[13]),
     modalidad: String(r[15] || (/llevar/i.test(r[8]) ? 'Recojo' : 'Sin especificar')), solicitud: String(r[16] || ''),
-    anulado: String(r[14]).toLowerCase().indexOf('anul') >= 0
+    anulado: String(r[14]).toLowerCase().indexOf('anul') >= 0,
+    correo: String(r[17] || ''), empresa: String(r[18] || ''), area: String(r[19] || ''), vale: String(r[20] || ''), pago: String(r[21] || ''), fila: i + 2
   })).filter(l => l.fecha && (!fecha || l.fecha === fecha) && (incluirAnulados || !l.anulado));
 }
 
 function comprobante_(lineas) {
   const l = lineas[0];
-  return {codigo:l.codigo, servicio:l.servicio, modalidad:l.modalidad, nombre:l.nombre,registro:l.registro,
-    hora:Utilities.formatDate(l.hora,tz_(),'dd/MM/yyyy HH:mm'),
-    items:lineas.map(i => ({plato:i.plato,tipo:i.tipo,cant:i.cant,subtotal:Math.round(i.cant*i.precio*100)/100})),
+  return {codigo:l.codigo, servicio:l.servicio, sKey:l.sKey, modalidad:l.modalidad, nombre:l.nombre, registro:l.registro,
+    hora:Utilities.formatDate(l.hora,tz_(),'dd/MM/yyyy HH:mm'), fechaKey:l.fecha, personal:l.personal, descuento:l.descuento, pago:l.pago,
+    obs:l.obs, correo:l.correo, empresa:l.empresa, area:l.area, solicitud:l.solicitud, vale:l.vale, filas:lineas.map(i => i.fila),
+    items:lineas.map(i => ({plato:i.plato,tipo:i.tipo,cant:i.cant,precio:i.precio,subtotal:Math.round(i.cant*i.precio*100)/100})),
     total:Math.round(lineas.reduce((t,i) => t+i.cant*i.precio,0)*100)/100};
 }
 
@@ -398,6 +531,183 @@ function usados_(lineas) {
   const u = {};
   lineas.forEach(l => { const k = claveUso_(l.fecha, l.sKey, l.plato); u[k] = (u[k] || 0) + l.cant; });
   return u;
+}
+
+// ---------------------------------------------------------------- Vale de consumo (PDF)
+function html_(s) { return String(s == null ? '' : s).replace(/^'/, '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function numeroVale_(v) { return v.fechaKey.replace(/-/g, '') + '-' + v.codigo; }
+function fechaVale_(v) { return v.fechaKey.split('-').reverse().join('/'); }
+
+// Genera el vale una sola vez por pedido, lo guarda en Drive y anota el link en Pedidos.
+// Devuelve el PDF, o null si ya estaba guardado.
+function guardarVale_(v) {
+  const cache = CacheService.getScriptCache(), clave = 'vale-' + v.solicitud;
+  if (v.vale || cache.get(clave)) return null;
+  cache.put(clave, '1', 21600);
+  const pdf = valePdf_(v);
+  const archivo = carpetaVales_(v.fechaKey).createFile(pdf);
+  const sh = hojaPedidos_();
+  v.filas.forEach(f => sh.getRange(f, COL_VALE).setValue(archivo.getUrl()));
+  v.vale = archivo.getUrl();
+  return pdf;
+}
+
+function correoVale_(v, correo, pdf) {
+  const modo = v.modalidad === 'Recojo' ? 'para llevar' : 'consumo en local';
+  MailApp.sendEmail({
+    to: correo, name: 'Comedor Sodexo', attachments: [pdf],
+    subject: 'Vale de consumo N° ' + numeroVale_(v) + ' · ' + v.servicio + ' ' + fechaVale_(v),
+    htmlBody: '<div style="font-family:Arial,sans-serif;font-size:14px;color:#1b2333">' +
+      '<p>Hola ' + html_(v.nombre) + ',</p>' +
+      '<p>Registramos tu pedido de <b>' + html_(v.servicio) + '</b> (' + modo + ') del ' + fechaVale_(v) + '.</p>' +
+      '<table style="border-collapse:collapse;font-size:14px">' + v.items.map(i =>
+        '<tr><td style="padding:4px 12px 4px 0">' + i.cant + ' × ' + html_(i.plato) + ' · ' + html_(i.tipo) + '</td>' +
+        '<td style="padding:4px 0;text-align:right">S/ ' + i.subtotal.toFixed(2) + '</td></tr>').join('') +
+      '<tr><td style="padding:8px 12px 0 0;border-top:1px solid #999"><b>Total</b></td>' +
+      '<td style="padding:8px 0 0;border-top:1px solid #999;text-align:right"><b>S/ ' + v.total.toFixed(2) + '</b></td></tr></table>' +
+      '<p>Código para el comedor: <b style="font-size:18px;color:#1f3864">' + html_(v.codigo) + '</b></p>' +
+      '<p>Adjuntamos la copia de tu vale de consumo en PDF.</p></div>'
+  });
+}
+
+function buscarCarpeta_(dentro, nombre) { const it = dentro.getFoldersByName(nombre); return it.hasNext() ? it.next() : dentro.createFolder(nombre); }
+
+// Carpeta "Vales de consumo" junto a la hoja de cálculo.
+function carpetaValesRaiz_() {
+  const padres = DriveApp.getFileById(ss_().getId()).getParents();
+  return buscarCarpeta_(padres.hasNext() ? padres.next() : DriveApp.getRootFolder(), CARPETA_VALES);
+}
+
+function carpetaVales_(fechaKey) { return buscarCarpeta_(carpetaValesRaiz_(), fechaKey.slice(0, 7)); }   // subcarpeta por mes: 2026-09
+
+// Link "Abrir carpeta" en el panel de la hoja Menú.
+function linkCarpeta_(sh) {
+  const url = carpetaValesRaiz_().getUrl();
+  sh.getRange(P.CARPETA).setRichTextValue(SpreadsheetApp.newRichTextValue().setText('Abrir carpeta ↗').setLinkUrl(url).build())
+    .setFontWeight('bold');
+  return url;
+}
+
+function abrirCarpetaVales_() {
+  const url = linkCarpeta_(hojaMenu_());
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(
+    '<div style="font-family:Arial;padding:6px"><p style="margin:0 0 12px">Aquí se guardan los vales en PDF, en una subcarpeta por mes.</p>' +
+    '<a href="' + url + '" target="_blank" style="display:inline-block;background:#1f3864;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;font-weight:bold">📂 Abrir carpeta de vales</a></div>' +
+    '<script>window.open(' + JSON.stringify(url) + ',"_blank");</script>').setWidth(380).setHeight(130), 'Vales de consumo');
+}
+
+// Vale en una hoja horizontal de 15 × 10.5 cm (se arma en Google Docs y se exporta a PDF).
+const VALE_ANCHO = 425, VALE_ALTO = 298, VALE_MARGEN = 14;   // puntos (1 cm = 28.35 pt)
+
+function valePdf_(v) {
+  const DA = DocumentApp, A = DA.Attribute;
+  const doc = DA.create('tmp-vale-' + numeroVale_(v));
+  const body = doc.getBody();
+  body.setPageWidth(VALE_ANCHO).setPageHeight(VALE_ALTO)
+    .setMarginTop(VALE_MARGEN).setMarginBottom(VALE_MARGEN).setMarginLeft(VALE_MARGEN + 4).setMarginRight(VALE_MARGEN + 4);
+  const util = VALE_ANCHO - 2 * (VALE_MARGEN + 4);
+  const txt = s => String(s == null ? '' : s).replace(/^'/, '');
+  const box = on => on ? '☒' : '☐';
+
+  // Da formato a todas las celdas de una tabla: tamaño de letra, sin espacios extra y relleno mínimo.
+  const formato = (t, tam, anchos, borde) => {
+    t.setBorderWidth(borde ? 0.75 : 0).setBorderColor('#555555');
+    anchos.forEach((w, i) => t.setColumnWidth(i, w));
+    for (let r = 0; r < t.getNumRows(); r++) {
+      const fila = t.getRow(r);
+      for (let c = 0; c < fila.getNumCells(); c++) {
+        const cel = fila.getCell(c);
+        cel.setPaddingTop(1).setPaddingBottom(1).setPaddingLeft(3).setPaddingRight(3).setVerticalAlignment(DA.VerticalAlignment.CENTER);
+        for (let k = 0; k < cel.getNumChildren(); k++) {
+          const p = cel.getChild(k).asParagraph();
+          p.setSpacingBefore(0).setSpacingAfter(0).setLineSpacing(1);
+          p.setAttributes({ [A.FONT_SIZE]: tam, [A.FONT_FAMILY]: 'Arial' });
+        }
+      }
+    }
+    return t;
+  };
+  const estilo = (cel, o) => {
+    const t = cel.editAsText();
+    if (!t.getText().length) return;
+    if (o.b) t.setBold(true);
+    if (o.i) t.setItalic(true);
+    if (o.tam) t.setFontSize(o.tam);
+    if (o.color) t.setForegroundColor(o.color);
+    if (o.al) cel.getChild(0).asParagraph().setAlignment(o.al);
+  };
+  const sep = alto => body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(0).setLineSpacing(1)
+    .setAttributes({ [A.FONT_SIZE]: alto });
+  const H = DA.HorizontalAlignment;
+
+  // Encabezado
+  const p0 = body.getParagraphs()[0];
+  p0.setSpacingBefore(0).setSpacingAfter(0).setAttributes({ [A.FONT_SIZE]: 2 });
+  const cab = formato(body.appendTable([
+    ['sodexo', 'VALE DE CONSUMO', 'N° ' + numeroVale_(v)],
+    ['Comedor Staff Ilo ' + box(COMEDOR === 'Staff Ilo') + '    Comedor Hospital ' + box(COMEDOR === 'Hospital'), '', 'Fecha: ' + fechaVale_(v)]
+  ]), 9, [110, 160, util - 270], false);
+  estilo(cab.getCell(0, 0), { b: true, i: true, tam: 17, color: '#2a295c' });
+  estilo(cab.getCell(0, 1), { i: true, tam: 13, al: H.CENTER });
+  estilo(cab.getCell(0, 2), { tam: 12, al: H.RIGHT });
+  estilo(cab.getCell(1, 2), { b: true, al: H.RIGHT });
+  sep(3);
+
+  // Datos de la persona
+  const tipos = ['SPCC', 'Funcionario', 'Empleado', 'Contratista'];
+  let tipoTxt = tipos.map(p => p + ' ' + box(keyS_(p) === keyS_(v.personal))).join('     ');
+  if (!tipos.some(p => keyS_(p) === keyS_(v.personal))) tipoTxt += '     ' + txt(v.personal) + ' ☒';
+  const datos = formato(body.appendTable([
+    ['Nombre:', txt(v.nombre), 'Registro/DNI:', txt(v.registro)],
+    ['Personal:', tipoTxt, '', ''],
+    ['Empresa:', txt(v.empresa), 'Dpto./Área:', txt(v.area)],
+    ['Cuenta:', '', '', '']
+  ]), 8.5, [52, 190, 62, util - 304], true);
+  [[0, 1], [0, 3], [2, 1], [2, 3]].forEach(rc => estilo(datos.getCell(rc[0], rc[1]), { b: true }));
+  sep(3);
+
+  // Servicios: cantidad, precio y firma
+  const filasSrv = [['Desayuno', /^desayuno/], ['Almuerzo', /^almuerzo/], ['Cena', /^cena/], ['Rancho', /rancho/]];
+  let usada = filasSrv.findIndex(f => f[1].test(v.sKey));
+  const etiquetas = filasSrv.map(f => f[0]);
+  if (usada < 0) { etiquetas.push(txt(v.servicio)); usada = etiquetas.length - 1; }
+  const cant = v.items.reduce((t, i) => t + i.cant, 0);
+  const grid = formato(body.appendTable([['', 'Cant.', 'Precio S/', 'Firma']].concat(etiquetas.map((et, i) =>
+    [et, i === usada ? String(cant) : '', 'S/ ' + (i === usada ? v.total.toFixed(2) : ''), i === usada && !v.firma ? 'Pedido web · ' + v.codigo : '']))),
+    8.5, [80, 55, 80, util - 215], true);
+  for (let c = 0; c < 4; c++) { estilo(grid.getCell(0, c), { b: true, al: H.CENTER }); grid.getCell(0, c).setBackgroundColor('#eef2f9'); }
+  estilo(grid.getCell(usada + 1, 1), { b: true, al: H.CENTER });
+  estilo(grid.getCell(usada + 1, 2), { b: true });
+  if (v.firma) {
+    const img = grid.getCell(usada + 1, 3).getChild(0).asParagraph().setAlignment(H.CENTER)
+      .appendInlineImage(Utilities.newBlob(Utilities.base64Decode(v.firma.split(',')[1]), 'image/png', 'firma.png'));
+    const alto = 26;
+    img.setWidth(Math.round(img.getWidth() * alto / img.getHeight())).setHeight(alto);
+  }
+  sep(3);
+
+  // Total y descuento por planilla
+  const pie = formato(body.appendTable([
+    [box(v.descuento === 'Sí') + '  Sujeto a descuento por Planilla', 'CONSUMO TOTAL'],
+    [box(v.descuento === 'No') + '  NO sujeto a descuento por Planilla' + (v.pago ? '   ·   Pago: ' + v.pago : ''), 'S/ ' + v.total.toFixed(2)]
+  ]), 9, [util - 120, 120], false);
+  estilo(pie.getCell(0, 1), { b: true, al: H.RIGHT });
+  estilo(pie.getCell(1, 1), { b: true, tam: 13, al: H.RIGHT });
+  sep(3);
+
+  // Detalle
+  const det = body.appendParagraph('Detalle: ' + txt(v.servicio) + ' · ' + (v.modalidad === 'Recojo' ? 'Para llevar' : 'Consumo en local') +
+    ' · ' + v.items.map(i => i.cant + '× ' + txt(i.plato) + ' ' + txt(i.tipo) + ' (S/ ' + i.precio.toFixed(2) + ')').join(', ') +
+    (v.obs ? ' · Obs.: ' + txt(v.obs) : '') + ' · Registrado ' + v.hora);
+  det.setSpacingBefore(0).setSpacingAfter(0).setLineSpacing(1);
+  det.editAsText().setFontSize(7).setForegroundColor('#444444').setFontFamily('Arial');
+
+  doc.saveAndClose();
+  const archivo = DriveApp.getFileById(doc.getId());
+  const pdf = archivo.getAs(MimeType.PDF)
+    .setName('Vale ' + numeroVale_(v) + ' - ' + txt(v.nombre).replace(/[\\/:*?"<>|]/g, '') + '.pdf');
+  archivo.setTrashed(true);
+  return pdf;
 }
 
 // ---------------------------------------------------------------- Link
@@ -426,6 +736,9 @@ function alEditar_(e) {
   const enPedidos = nombre === HOJA_PEDIDOS && e.range.getLastColumn() >= 15;
   if (enMenu || enPedidos || nombre === HOJA_PRECIOS) {
     try { actualizarStock_(); } catch (err) { Logger.log(err); }
+  }
+  if (nombre === HOJA_MENU && c <= 3 && e.range.getLastColumn() >= 3 && e.range.getLastRow() > 1) {
+    try { sincronizarPlatos_(); } catch (err) { Logger.log(err); }
   }
 }
 
@@ -581,10 +894,10 @@ function disenarHoja_() {
   sh.getRange('J9:J10').setBackground(AZUL_CLARO);
   sh.getRange('J2:L10').setBorder(true, true, true, true, true, true, '#b7c4de', SpreadsheetApp.BorderStyle.SOLID);
 
-  sh.getRange('J12').setValue('📄 REPORTE PARA MOZOS').setFontWeight('bold');
-  sh.setRowHeight(P.REP_FILA, 30);
-  sh.setRowHeight(P.REP_FILA + 1, 30);
-  sh.getRange(P.REP_MSG).setValue('Menú 🍽️ Comedor → Reporte para mozos (PDF)').setFontColor('#666666');
+  sh.getRange('J12').setValue('📂 Vales de consumo (PDF)').setFontWeight('bold').setBackground(AZUL_CLARO);
+  sh.getRange('K12:L12').merge();
+  try { linkCarpeta_(sh); } catch (e) { Logger.log(e); }
+  sh.getRange('J12:L12').setBorder(true, true, true, true, true, true, '#b7c4de', SpreadsheetApp.BorderStyle.SOLID);
 
   sh.getRange('J19:L19').merge().setValue('ℹ️ CÓMO USARLO').setFontWeight('bold').setBackground(GRIS);
   sh.getRange('J20:L27').merge().setWrap(true).setVerticalAlignment('top').setBackground(GRIS).setValue(
@@ -592,113 +905,91 @@ function disenarHoja_() {
     '2. Cada servicio abre y cierra solo según su horario (tabla de arriba). El formulario muestra los platos de hoy.\n' +
     '3. Las opciones y precios de cada servicio (completo, económico, segundo) están en la hoja "Precios".\n' +
     '4. Modalidad Local/Recojo, Activo e Incluye se editan también en Precios. Los pedidos llegan a la hoja "Pedidos". Para anular uno, escribe "Anulado" en la columna Estado.\n' +
-    '5. Pulsa "Reporte para mozos (PDF)" para descargar los pedidos de hoy.');
+    '5. Cada pedido genera su vale en PDF. Ábrelos con el link "Abrir carpeta" (K12) o en Menú 🍽️ Comedor → Abrir carpeta de vales.');
 }
 
-// ---------------------------------------------------------------- Reporte para mozos (PDF)
-function construirPdf_(lineas) {
-  const doc = DocumentApp.create('tmp-reporte-mozos');
-  const body = doc.getBody();
-  body.setPageWidth(842).setPageHeight(595).setMarginTop(28).setMarginBottom(28).setMarginLeft(28).setMarginRight(28);
+// ---------------------------------------------------------------- Menú de ejemplo (semana del 21 al 27/09/2026)
+// Platos de fondo del menú semanal impreso. Cada día: [platos..., acompañamiento].
+const MENU_EJEMPLO = {
+  'Desayuno': [
+    [['Pollo a la cacerola'], 'Papa sancochada'],
+    [['Arroz a la jardinera con cerdo'], 'Ensalada fresca'],
+    [['Sarza de atún'], 'Papa sancochada'],
+    [['Papa arrebozada'], ''],
+    [['Revuelto de verduras'], 'Camote sancochado'],
+    [['Lomito al jugo'], 'Papa sancochada'],
+    [['Omelette'], '']
+  ],
+  'Almuerzo': [
+    [['Arroz con pollo', 'Lomo saltado'], 'Sarza criolla, papas fritas y arroz blanco'],
+    [['Ají de pollo', 'Asado de res'], 'Puré de papa y arroz blanco'],
+    [['Carapulcra de cerdo', 'Pollo guisado'], 'Camote sancochado y arroz blanco'],
+    [['Pollo oriental', 'Picante a la tacneña'], 'Sarza criolla y arroz blanco'],
+    [['Pollo al perejil', 'Albóndigas a la boloñesa'], 'Yuca sancochada, tallarín rojo y arroz blanco'],
+    [['Pollo al romero', 'Pescado frito'], 'Papa sancochada, ensalada fresca y arroz blanco'],
+    [['Pollo al horno', 'Cerdo al horno'], 'Papa al horno, frejoles y arroz blanco']
+  ],
+  'Cena': [
+    [['Pollo a la naranja', 'Tallarín saltado con res'], 'Camote sancochado y arroz blanco'],
+    [['Saltado de mollejitas', 'Pollo al sillao'], 'Papas fritas y arroz con perejil'],
+    [['Asado de pollo', 'Pescado al horno'], 'Papa al horno, camote sancochado y arroz blanco'],
+    [['Cerdo agridulce', 'Pollo a la mostaza'], 'Puré de camote, papa sancochada y arroz blanco'],
+    [['Pollo tipo parrilla', 'Guiso de fideo con res'], 'Papa sancochada y arroz blanco'],
+    [['Cerdo al horno', 'Revuelto de verduras'], 'Camote sancochado y arroz blanco'],
+    [['Pollo a la plancha', 'Arroz tapado'], 'Papa sancochada y arroz blanco']
+  ],
+  'Rancho caliente': [
+    [['Lentejita guisada con cerdo'], 'Arroz blanco · fruta mandarina'],
+    [['Pollo al horno'], 'Papa sancochada, arroz blanco · pudín de fruta'],
+    [['Cerdo al horno'], 'Camote sancochado, arroz blanco · mazamorra morada'],
+    [['Pollo arvejado'], 'Papa sancochada, arroz blanco · compota de fruta'],
+    [['Matasquita de res'], 'Arroz blanco · fruta manzana delicia'],
+    [['Pollo al romero'], 'Papa sancochada, arroz blanco · fruta mandarina'],
+    [['Chuleta de cerdo'], 'Papas fritas, arroz blanco · fruta manzana israel']
+  ]
+};
 
-  const estilo = (tabla, nCols) => {
-    tabla.setBorderWidth(0.5).setBorderColor('#999999');
-    for (let r = 0; r < tabla.getNumRows(); r++) {
-      for (let c = 0; c < nCols; c++) tabla.getCell(r, c).setPaddingTop(2).setPaddingBottom(2).editAsText().setFontSize(9);
-    }
-    for (let c = 0; c < nCols; c++) tabla.getCell(0, c).setBackgroundColor(AZUL).editAsText().setBold(true).setForegroundColor('#ffffff');
-  };
-
-  const opciones = leerOpciones_();
-  const orden = leerServicios_().map(s => s.key);
-  const grupos = {};
-  lineas.forEach(l => (grupos[l.sKey] = grupos[l.sKey] || []).push(l));
-  const claves = Object.keys(grupos).sort((a, b) => (orden.indexOf(a) + 1 || 99) - (orden.indexOf(b) + 1 || 99));
-
-  body.appendParagraph('Reporte de pedidos – Comedor SODEXO').setHeading(DocumentApp.ParagraphHeading.HEADING1);
-  body.appendParagraph(fechaLarga_(new Date()) + '   ·   Generado: ' + Utilities.formatDate(new Date(), tz_(), 'dd/MM/yyyy HH:mm'))
-    .setFontSize(9).setForegroundColor('#666666');
-
-  claves.forEach((k, idx) => {
-    const filas = grupos[k].map(f => Object.assign({}, f, {tipo: f.modalidad + ' · ' + f.tipo}));
-    if (idx > 0) body.appendPageBreak();
-    body.appendParagraph(filas[0].servicio.toUpperCase()).setHeading(DocumentApp.ParagraphHeading.HEADING2);
-
-    const tipos = [];
-    filas.forEach(f => { if (tipos.indexOf(f.tipo) < 0) tipos.push(f.tipo); });
-    const res = {};
-    filas.forEach(f => { res[f.plato] = res[f.plato] || {}; res[f.plato][f.tipo] = (res[f.plato][f.tipo] || 0) + f.cant; });
-    const tot = tipos.map(() => 0);
-    const datosRes = Object.keys(res).sort().map(p => {
-      const fila = tipos.map((t, i) => { const v = res[p][t] || 0; tot[i] += v; return v; });
-      return [p].concat(fila.map(String)).concat([String(fila.reduce((a, b) => a + b, 0))]);
+// Ejecuta esta desde el editor (Correr → cargarMenuEjemplo). No duplica filas si se ejecuta dos veces.
+function cargarMenuEjemplo() {
+  const sh = hojaMenu_(), servicios = leerServicios_();
+  const existentes = new Set(leerMenuTodo_().map(m => claveUso_(m.fecha, m.sKey, m.plato)));
+  const col = sh.getRange(2, 3, FILAS_MENU, 1).getValues();
+  let libre = col.length; while (libre > 0 && !String(col[libre - 1][0]).trim()) libre--;
+  const filas = [], faltan = [], ingredientes = {};
+  Object.keys(MENU_EJEMPLO).forEach(nombre => {
+    const s = servicios.filter(x => x.key === keyS_(nombre))[0];
+    if (!s) { faltan.push(nombre); return; }
+    MENU_EJEMPLO[nombre].forEach((dia, i) => {
+      const fecha = new Date(2026, 8, 21 + i, 12), fk = '2026-09-' + (21 + i);
+      dia[0].forEach(plato => {
+        if (!ingredientes[keyS_(plato)] && dia[1]) ingredientes[keyS_(plato)] = dia[1];
+        if (!existentes.has(claveUso_(fk, s.key, plato))) filas.push([fecha, s.nombre, plato, 30]);
+      });
     });
-    datosRes.push(['TOTAL'].concat(tot.map(String)).concat([String(tot.reduce((a, b) => a + b, 0))]));
-    const cabRes = ['Plato'].concat(tipos).concat(['TOTAL']);
-    const tRes = body.appendTable([cabRes].concat(datosRes));
-    estilo(tRes, cabRes.length);
-    tRes.getRow(tRes.getNumRows() - 1).editAsText().setBold(true);
-
-    body.appendParagraph('Detalle').setHeading(DocumentApp.ParagraphHeading.HEADING3);
-    const cab = ['Código', 'Nombre', 'Registro / DNI', 'Personal', 'Plato', 'Opción', 'Cant.', 'Desc. planilla', 'Obs.', 'Entregado'];
-    const datos = filas.map(f => [f.codigo, f.nombre, f.registro, f.personal, f.plato, f.tipo,
-      String(f.cant), f.descuento, f.obs || '', '☐']);
-    estilo(body.appendTable([cab].concat(datos)), cab.length);
   });
+  if (libre + filas.length > FILAS_MENU) throw new Error('No hay filas libres suficientes en la hoja Menú.');
+  if (filas.length) sh.getRange(libre + 2, 1, filas.length, 4).setValues(filas);
 
-  doc.saveAndClose();
-  const archivoDoc = DriveApp.getFileById(doc.getId());
-  const pdf = archivoDoc.getAs(MimeType.PDF);
-  archivoDoc.setTrashed(true);
-  return pdf;
-}
-
-function carpetaReportes_() {
-  const padres = DriveApp.getFileById(ss_().getId()).getParents();
-  const padre = padres.hasNext() ? padres.next() : DriveApp.getRootFolder();
-  const it = padre.getFoldersByName('Reportes Mozos');
-  return it.hasNext() ? it.next() : padre.createFolder('Reportes Mozos');
-}
-
-function reporteAMozos_() {
-  const sh = hojaMenu_();
-  const estado = sh.getRange(P.REP_MSG);
-  try {
-    const filas = leerLineas_(hoyKey_(), false).sort((a, b) =>
-      a.servicio.localeCompare(b.servicio) || a.plato.localeCompare(b.plato) || a.tipo.localeCompare(b.tipo) || a.nombre.localeCompare(b.nombre));
-    if (!filas.length) { aviso_('Todavía no hay pedidos registrados hoy.'); return; }
-
-    const nombre = 'Reporte Mozos ' + Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH-mm') + '.pdf';
-    const pdf = construirPdf_(filas).setName(nombre);
-    const archivo = carpetaReportes_().createFile(pdf);
-    // El reporte conserva los permisos de Drive del administrador.
-
-    estado.setValue('✅ Último reporte: ' + Utilities.formatDate(new Date(), tz_(), 'dd/MM HH:mm') + ' (' + filas.length + ' líneas)')
-      .setFontColor('#274e13');
-    sh.getRange(P.REP_LINK).setValue(archivo.getUrl());
-
-    const b64 = Utilities.base64Encode(pdf.getBytes());
-    const urlDescarga = 'https://drive.google.com/uc?export=download&id=' + archivo.getId();
-    const html = HtmlService.createHtmlOutput(
-      '<div style="font-family:Arial;padding:6px">' +
-      '<p style="margin:0 0 10px">✅ Reporte listo: <b>' + filas.length + '</b> líneas de pedido.</p>' +
-      '<a id="d" download="' + nombre + '" href="data:application/pdf;base64,' + b64 + '" ' +
-      'style="display:inline-block;background:#1f3864;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;font-weight:bold">⬇ Descargar PDF</a>' +
-      '<p style="font-size:12px;color:#555;margin-top:12px">Si no se descarga: <a href="' + urlDescarga + '" target="_blank">descargar desde Drive</a>' +
-      ' · <a href="' + archivo.getUrl() + '" target="_blank">ver / compartir con mozos</a></p>' +
-      '</div><script>setTimeout(function(){document.getElementById("d").click();},300);</script>'
-    ).setWidth(420).setHeight(170);
-    SpreadsheetApp.getUi().showModalDialog(html, 'Reporte para mozos');
-  } catch (e) {
-    estado.setValue('❌ Error: ' + e.message).setFontColor('#990000');
-    aviso_('❌ ' + e.message);
+  // Acompañamientos en la hoja Platos (solo donde está vacío)
+  sincronizarPlatos_();
+  const hp = hojaPlatos_(), n = hp.getLastRow() - 1;
+  if (n > 0) {
+    const v = hp.getRange(2, 1, n, 2).getValues();
+    v.forEach(r => { if (!String(r[1]).trim() && ingredientes[keyS_(r[0])]) r[1] = ingredientes[keyS_(r[0])]; });
+    hp.getRange(2, 2, n, 1).setValues(v.map(r => [r[1]]));
   }
+  actualizarStock_();
+  aviso_('✅ Se agregaron ' + filas.length + ' platos del 21 al 27/09/2026 (stock 30 cada uno).' +
+    (faltan.length ? '\n\n⚠️ No se cargó: ' + faltan.join(', ') + '. Agrégalo en el panel (columna J de Menú) con su horario y vuelve a ejecutar.' : ''));
 }
 
 // ---------------------------------------------------------------- Configuración
+// Ejecuta esta desde el editor (Correr → configurarTodo). Las funciones que terminan en "_" no aparecen en la lista.
+function configurarTodo() { configurarTodo_(); }
+
 function configurarTodo_() {
   const ss = SpreadsheetApp.getActive();
-  if (!ss) throw new Error('Ejecuta esta función desde Extensiones → Apps Script de tu Google Sheet.');
+  if (!ss) throw new Error('Este proyecto no está vinculado a la hoja. Abre tu Google Sheet → Extensiones → Apps Script, pega ahí el código y ejecuta configurarTodo.');
   PropertiesService.getScriptProperties().setProperty('COMEDOR_SS_ID', ss.getId());
   ss.setSpreadsheetTimeZone('America/Lima'); TZ = null;
   ScriptApp.getProjectTriggers().filter(t => ['alEditar','controlHorario','alEditar_','controlHorario_'].includes(t.getHandlerFunction())).forEach(t => ScriptApp.deleteTrigger(t));
@@ -715,6 +1006,7 @@ function configurarTodo_() {
 
   configurarPrecios_();
   hojaPedidos_();
+  sincronizarPlatos_();
   disenarHoja_();
 
   ss.setActiveSheet(sh);
