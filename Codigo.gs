@@ -28,7 +28,8 @@ const PRECIOS_DEF = [
   ['Cena', 'Completo', 11.9, 'Recojo', 'Sí'],
   ['Cena', 'Económico', 10.3, 'Recojo', 'Sí'],
   ['Cena', 'Solo segundo', '', 'Local', 'No'],
-  ['Cena', 'Solo segundo', '', 'Recojo', 'No']
+  ['Cena', 'Solo segundo', '', 'Recojo', 'No'],
+  ['Rancho caliente', 'Completo', 13.2, 'Local', 'Sí']
 ];
 const CAB_PED = ['Fecha y hora', 'Código', 'Fecha consumo', 'Servicio', 'Nombre completo', 'Tipo de personal',
   'Registro / DNI', 'Plato', 'Opción', 'Cantidad', 'Precio unit.', 'Subtotal', 'Descuento planilla', 'Observaciones', 'Estado', 'Modalidad', 'Solicitud ID'];
@@ -121,11 +122,11 @@ function doGet() {
 function datosFormulario(fecha) {
   const actual = hoyKey_(), hoy = fecha ? fechaKey_(fecha) : actual, ahora = minutosAhora_();
   if (!hoy) throw new Error('Fecha no válida.');
-  const opciones = leerOpciones_();
-  const menuHoy = unicos_(leerMenuTodo_().filter(m => m.fecha === hoy));
+  const opciones = leerOpciones_(), menu = leerMenuTodo_(), servs = leerServicios_();
+  const menuHoy = unicos_(menu.filter(m => m.fecha === hoy));
   const usados = usados_(leerLineas_(hoy, false));
 
-  const servicios = leerServicios_().map(s => {
+  const servicios = servs.map(s => {
     const platos = menuHoy.filter(m => m.sKey === s.key).map(m => {
       const u = usados[claveUso_(hoy, s.key, m.plato)] || 0;
       return { plato: m.plato, stock: m.stock, quedan: m.stock == null ? null : Math.max(0, m.stock - u) };
@@ -143,9 +144,15 @@ function datosFormulario(fecha) {
     };
   });
 
-  return { fecha: hoy.split('-').reverse().join('/'), fechaKey: hoy, hoy: actual,
-    fechas: Array.from(new Set([actual,hoy].concat(leerMenuTodo_().map(m => m.fecha).filter(f => f >= actual)))).sort(),
-    servicios: servicios, personal: leerPersonal_(), max: MAX_POR_PERSONA };
+  // Menú programado de los próximos días (solo consulta)
+  const semana = Array.from(new Set(menu.map(m => m.fecha).filter(f => f >= actual))).sort().slice(0, 7).map(f => {
+    const delDia = unicos_(menu.filter(m => m.fecha === f));
+    return { fecha: f, servicios: servs.map(s => ({ nombre: s.nombre,
+      platos: delDia.filter(m => m.sKey === s.key).map(m => m.plato) })).filter(s => s.platos.length) };
+  }).filter(d => d.servicios.length);
+
+  return { fecha: hoy.split('-').reverse().join('/'), fechaKey: hoy, hoy: actual, ahora: ahora,
+    semana: semana, servicios: servicios, personal: leerPersonal_(), max: MAX_POR_PERSONA };
 }
 
 // Recibe el pedido, valida todo con bloqueo y lo guarda

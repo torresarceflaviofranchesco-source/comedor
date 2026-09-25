@@ -57,8 +57,8 @@ h2{font-size:17.5px;font-weight:700;letter-spacing:-.01em}
 .plato-h{display:flex;align-items:center;gap:12px;padding:15px 14px;width:100%;border:0;background:none;text-align:left}
 .ck{flex:none;width:24px;height:24px;border-radius:7px;border:2px solid #c2cad9;display:grid;place-items:center;transition:all .15s}
 .ck svg{width:15px;height:15px;opacity:0;color:#fff}
-.plato.sel{border-color:var(--azul);box-shadow:0 0 0 3px rgba(31,56,100,.10)}
-.plato.sel .ck{background:var(--azul);border-color:var(--azul)}.plato.sel .ck svg{opacity:1}
+.plato.sel,.plato.con{border-color:var(--azul);box-shadow:0 0 0 3px rgba(31,56,100,.10)}
+.plato.con .ck{background:var(--azul);border-color:var(--azul);color:#fff;font-weight:700;font-size:14px}
 .pn{flex:1;min-width:0}
 .pn b{display:block;font-size:16px;font-weight:600}
 .pn small{display:block;color:var(--sub);font-size:12.5px;margin-top:1px}
@@ -75,7 +75,8 @@ h2{font-size:17.5px;font-weight:700;letter-spacing:-.01em}
 .tipo:last-child,.tipo:has(+ .aviso-sel){border-bottom:0}
 .tipo .tn{flex:1}
 .tipo .tn b{display:block;font-weight:500;font-size:14.5px}
-.tipo .tn small{color:var(--sub);font-size:13px}
+.tipo .tn small{color:var(--sub);font-size:12.5px}
+.tipo .px{font-weight:700;font-size:15px;color:var(--azul);white-space:nowrap}
 .tipo.tiene .tn b{font-weight:600;color:var(--azul)}
 .stp{display:flex;align-items:center;border:1.5px solid var(--borde);border-radius:10px;background:#fff;overflow:hidden}
 .stp button{width:40px;height:38px;border:0;background:#fff;color:var(--azul);font-size:20px;font-weight:500;line-height:1}
@@ -84,6 +85,7 @@ h2{font-size:17.5px;font-weight:700;letter-spacing:-.01em}
 .stp output{min-width:30px;text-align:center;font-weight:700;font-size:15px}
 .tipo.tiene .stp{border-color:var(--azul)}
 .aviso-sel{font-size:12.5px;color:var(--ambar);padding:0 0 10px;display:none}
+.plato-h:disabled{cursor:not-allowed}
 .plato.sel.vacio .aviso-sel{display:block}
 
 /* Resumen */
@@ -141,6 +143,16 @@ h2{font-size:17.5px;font-weight:700;letter-spacing:-.01em}
 .ag-h b{font-size:15.5px}
 .ag small{color:var(--sub);font-size:12.5px}
 .ag p{font-size:13.5px;margin-top:6px;color:var(--texto)}
+.ag .st{font-size:12px;font-weight:600;white-space:nowrap}
+.st.ok{color:var(--verde)}.st.pr{color:var(--ambar)}.st.no{color:var(--rojo)}
+.ag-t{font-size:13px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.06em;margin-top:18px}
+.semana{margin-top:18px;border-top:1px solid var(--borde);padding-top:12px;text-align:left}
+.semana summary{cursor:pointer;color:var(--azul2);font-weight:600;font-size:14px;padding:4px 0}
+.semana .dia{padding:10px 0;border-bottom:1px dashed var(--borde);font-size:13.5px}
+.semana .dia:last-child{border-bottom:0}
+.semana .dia>b{display:block;margin-bottom:4px}
+.semana .dia p{color:var(--sub);margin-top:2px}.semana .dia p span{color:var(--texto);font-weight:600}
+.urge{color:var(--rojo);font-weight:600}
 select{width:100%;border:1.5px solid var(--borde);padding:12px;border-radius:10px;background:white;font:inherit;color:var(--texto)}
 button:focus-visible,select:focus-visible{outline:3px solid #739edf;outline-offset:3px}
 @media(max-width:380px){.plato-h{gap:7px;padding:12px 9px}.badge{font-size:10px;padding:4px 6px}.pn b{font-size:14px}.btn{padding:13px}.srv b{font-size:13px}}
@@ -151,8 +163,8 @@ button:focus-visible,select:focus-visible{outline:3px solid #739edf;outline-offs
 
 <header class="top"><div class="top-in">
   <div class="marca">Sodexo · Comedor</div>
-  <h1>Tu pedido de comedor</h1>
-<p style="margin-top:6px;opacity:.85">Elige antes de llegar · Consumo en local o recojo</p>
+  <h1 id="titulo">Tu pedido de comedor</h1>
+  <p style="margin-top:6px;opacity:.85" id="subtitulo">Elige antes de llegar · Consumo en local o recojo</p>
   <div class="chips">
     <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg><span id="fecha">Hoy</span></span>
     <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span id="horario">—</span></span>
@@ -185,7 +197,7 @@ button:focus-visible,select:focus-visible{outline:3px solid #739edf;outline-offs
   <!-- Paso 1 -->
   <section id="p1" class="card" hidden>
     <h2>Tus datos</h2>
-    <p class="hint">Completa tus datos para identificar tu pedido.</p>
+    <p class="hint" id="p1Hint">Completa tus datos para identificar tu pedido.</p>
 
     <div class="f" id="f-nombre">
       <label for="nombre">Nombre completo <span class="req">*</span></label>
@@ -206,15 +218,15 @@ button:focus-visible,select:focus-visible{outline:3px solid #739edf;outline-offs
 
   <!-- Paso 2 -->
   <section id="p2" class="card" hidden>
-    <div class="sec-h"><h2>¿Qué vas a pedir?</h2><button type="button" class="editar" onclick="actualizarMenu()">Actualizar menú</button></div>
-    <p class="hint">Consulta el menú por fecha y elige cómo consumirlo. Los pedidos se reciben para hoy, dentro de cada horario.</p>
-    <div class="f"><label for="dia">Fecha del menú</label><select id="dia" onchange="cambiarFecha(this.value)"></select></div>
-    <div class="srvs" id="srvs"></div>
-    <div class="f"><div class="lab">Modalidad</div><div class="pills" id="modalidades">
+    <div class="sec-h"><h2 id="p2Tit">¿Qué vas a pedir?</h2><button type="button" class="editar" onclick="actualizarMenu()">Actualizar menú</button></div>
+    <p class="hint">Elige tu plato y luego la opción (completo, simple, económico…) con el botón +.</p>
+    <div class="srvs" id="srvs" hidden></div>
+    <div class="f"><div class="lab">¿Dónde lo vas a comer?</div><div class="pills" id="modalidades">
       <button class="pill on" type="button" data-v="Local" onclick="elegirModalidad('Local')">Consumo en local</button>
-      <button class="pill" type="button" data-v="Recojo" onclick="elegirModalidad('Recojo')">Recojo / para llevar</button>
+      <button class="pill" type="button" data-v="Recojo" onclick="elegirModalidad('Recojo')">Para llevar</button>
     </div></div><p class="hint" id="avisoHorario" role="status" style="margin-top:14px"></p>
     <div id="platos"></div>
+    <div id="semanaP2"></div>
   </section>
 
   <!-- Paso 3 -->
@@ -272,73 +284,140 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const soles=n=>'S/ '+Number(n).toFixed(2);
 const S=()=>D&&D.servicios[srv];
-const opciones=()=>S()?S().opciones.filter(o=>o.modalidad===modalidad):[];
+const opcionesDe=m=>S()?S().opciones.filter(o=>o.modalidad===m):[];
+const opciones=()=>opcionesDe(modalidad);
+const aMin=h=>{const t=String(h).split(':');return Number(t[0])*60+Number(t[1]||0);};
+// Minutos del día según la hora del servidor, avanzando con el reloj del celular desde que se cargó.
+const ahoraMin=()=>D.ahora+(Date.now()-D.recibido)/60000;
+const VERBO={desayuno:'desayunar',almuerzo:'almorzar',cena:'cenar'};
+const DIAS=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+function fechaTxt(f){return DIAS[new Date(f+'T12:00:00').getDay()]+' '+f.slice(8,10)+'/'+f.slice(5,7);}
 function toast(t){$('toast').textContent=t;$('toast').classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>$('toast').classList.remove('on'),5500);}
 function rpc(fn,...args){return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn](...args));}
 function mensaje(e){return (e&&e.message?e.message:'No se pudo conectar. Intenta nuevamente.').replace(/^Error:\s*/,'');}
 function limpiarPedido(){cant=Object.create(null);sel=Object.create(null);solicitud='';}
-function estadoTxt(s){
-  if(D.fechaKey!==D.hoy)return 'Solo consulta';
-  if(s.disponible)return 'Abierto hasta '+s.cierra;
-  if(s.estado==='pronto')return 'Abre '+s.abre;
-  return s.estado==='cerrado'?'Cerrado':s.motivo||'No disponible';
-}
 function puedePedir(){return S()&&S().disponible&&opciones().length>0;}
-async function cargar(){
-  if(cargando)return;
-  cargando=true;$('cargando').hidden=false;$('cerrado').hidden=true;
-  try{
-    D=await rpc('datosFormulario');
-    srv=servicioInicial();ajustarModalidad();
-    $('personal').innerHTML=D.personal.map(p=>'<button type="button" class="pill" data-v="'+esc(p)+'">'+esc(p)+'</button>').join('');
-    pintar();ir(1);
-  }catch(e){$('cerTit').textContent='No se pudo cargar el menú';$('motivo').textContent=mensaje(e);$('cerrado').hidden=false;$('pasos').hidden=true;}
-  finally{cargando=false;$('cargando').hidden=true;if(D)totales();}
+
+// Recuerda los datos del trabajador en este celular para no escribirlos cada vez.
+const LS='comedor.datos';
+function recordar(){try{localStorage.setItem(LS,JSON.stringify({nombre:$('nombre').value.trim(),registro:$('registro').value.trim(),personal}));}catch(e){}}
+function recuperar(){
+  try{const d=JSON.parse(localStorage.getItem(LS)||'null');if(!d)return;
+    $('nombre').value=d.nombre||'';$('registro').value=d.registro||'';personal=d.personal||'';
+    if(d.nombre)$('p1Hint').textContent='Recordamos tus datos del último pedido. Revísalos y continúa.';
+  }catch(e){}
 }
-// Servicio que corresponde a la hora actual: abierto para pedir, luego el que está en horario, luego el próximo.
-function servicioInicial(){
-  const ss=D.servicios;if(D.fechaKey!==D.hoy)return Math.min(srv,Math.max(0,ss.length-1));
-  const i=[s=>s.disponible,s=>s.estado==='abierto',s=>s.estado==='pronto'].map(f=>ss.findIndex(f)).find(i=>i>=0);
-  return i!==undefined?i:Math.max(0,ss.length-1);
+function marcarPersonal(){document.querySelectorAll('#personal .pill').forEach(x=>x.classList.toggle('on',x.dataset.v===personal));}
+
+function estadoTxt(s){
+  if(s.disponible)return ['ok','Abierto hasta '+s.cierra];
+  if(s.estado==='pronto')return ['pr','Abre '+s.abre];
+  if(s.estado==='abierto')return ['no',s.motivo||'No disponible'];
+  return ['no','Cerrado'];
+}
+const MOTIVOS={'Sin menú programado':'Aún no hay menú programado para hoy.','Precios por confirmar':'Los precios aún no están publicados. Intenta en unos minutos.','Agotado':'Todos los platos se agotaron.'};
+
+async function cargar(){
+  if(cargando||enviando)return;
+  cargando=true;clearTimeout(programar.t);
+  ['p1','p2','p3','cerrado','barra','pasos'].forEach(id=>$(id).hidden=true);$('cargando').hidden=false;
+  try{
+    const d=await rpc('datosFormulario');d.recibido=Date.now();D=d;limpiarPedido();
+    $('personal').innerHTML=D.personal.map(p=>'<button type="button" class="pill" data-v="'+esc(p)+'">'+esc(p)+'</button>').join('');
+    if(!D.personal.includes(personal))personal='';marcarPersonal();
+    const i=D.servicios.findIndex(s=>s.disponible);
+    if(i<0)mostrarCerrado();
+    else{srv=i;ajustarModalidad();pintar();ir(1);}
+  }catch(e){
+    $('cerTit').textContent='No se pudo cargar el menú';$('motivo').textContent=mensaje(e);$('agenda').innerHTML='';$('cerrado').hidden=false;
+  }finally{cargando=false;$('cargando').hidden=true;if(D){totales();programar();}}
+}
+// Sin servicio abierto: explica cuándo abre el siguiente y muestra el menú del día.
+function mostrarCerrado(){
+  const ss=D.servicios,enHorario=ss.find(s=>s.estado==='abierto'),prox=ss.find(s=>s.estado==='pronto');
+  let tit,txt;
+  if(!ss.length){tit='Sin horarios';txt='Aún no se configuraron los horarios del comedor.';}
+  else if(enHorario){tit=enHorario.nombre+' no disponible';txt=(MOTIVOS[enHorario.motivo]||enHorario.motivo||'')+(prox?' Próximo: '+prox.nombre+' a las '+prox.abre+'.':'');}
+  else if(prox){tit=prox.nombre+' abre a las '+prox.abre;txt='Los pedidos se reciben de '+prox.abre+' a '+prox.cierra+'. Esta página se actualizará sola a esa hora.';}
+  else{tit='Pedidos cerrados por hoy';txt='Vuelve mañana dentro del horario de cada servicio.';}
+  $('titulo').textContent='Comedor';$('fecha').textContent=fechaTxt(D.hoy);
+  $('horario').textContent=prox?prox.nombre+' abre '+prox.abre:'Cerrado';
+  $('cerTit').textContent=tit;$('motivo').textContent=txt;
+  $('agenda').innerHTML=(ss.length?'<p class="ag-t">Hoy</p>':'')+ss.map(s=>{const e=estadoTxt(s);
+    return '<div class="ag"><div class="ag-h"><b>'+esc(s.nombre)+'</b><span class="st '+e[0]+'">'+esc(e[1])+'</span></div><small>Pedidos de '+esc(s.abre)+' a '+esc(s.cierra)+'</small><p>'+(s.platos.length?esc(s.platos.map(p=>p.plato).join(' · ')):'Sin menú programado')+'</p></div>';}).join('')+semanaHTML();
+  $('cerrado').hidden=false;
+}
+function semanaHTML(){
+  const dias=(D.semana||[]).filter(d=>d.fecha!==D.hoy);
+  if(!dias.length)return '';
+  return '<details class="semana"><summary>Ver menú de los próximos días</summary>'+dias.map(d=>'<div class="dia"><b>'+fechaTxt(d.fecha)+'</b>'+d.servicios.map(s=>'<p><span>'+esc(s.nombre)+':</span> '+esc(s.platos.join(' · '))+'</p>').join('')+'</div>').join('')+'</details>';
+}
+// Revisa la página cuando abre o cierra un servicio.
+function programar(){
+  clearTimeout(programar.t);if(!D||D.fechaKey!==D.hoy)return;
+  const ahora=ahoraMin(),lim=D.servicios.flatMap(s=>[aMin(s.abre),aMin(s.cierra)]).filter(m=>m>ahora);
+  if(lim.length)programar.t=setTimeout(revisar,Math.min((Math.min(...lim)-ahora)*60000+3000,2**31-1));
+}
+function revisar(){
+  if(!$('listo').hidden)return;
+  if(enviando||cargando){programar.t=setTimeout(revisar,5000);return;}
+  if(!$('cerrado').hidden)return cargar();
+  if(S()&&aMin(S().cierra)<=ahoraMin()){toast('Terminó el horario de pedidos de '+S().nombre+'.');return cargar();}
+  if(paso<3&&S())pintar();
+  programar();
 }
 // Si la modalidad elegida no tiene precios pero la otra sí, cambia a la que tiene.
 function ajustarModalidad(){
   if(!S()||opciones().length)return;
   const otra=modalidad==='Local'?'Recojo':'Local';
-  if(S().opciones.some(o=>o.modalidad===otra))modalidad=otra;
+  if(opcionesDe(otra).length)modalidad=otra;
 }
-function actualizarMenu(){if(enviando||cargando)return;toast('Actualizando menú. Vuelve a seleccionar tus platos.');cambiarFecha(D.fechaKey);}
-async function cambiarFecha(fecha){
+function actualizarMenu(){if(enviando||cargando)return;toast('Actualizando menú. Vuelve a seleccionar tus platos.');refrescar();}
+async function refrescar(){
   if(enviando)return;
-  const turno=++carga;cargando=true;limpiarPedido();$('bSig').disabled=true;
-  try{const d=await rpc('datosFormulario',fecha);if(turno!==carga)return;const cambio=!D||D.fechaKey!==d.fechaKey;D=d;if(cambio)srv=servicioInicial();srv=Math.min(srv,Math.max(0,D.servicios.length-1));ajustarModalidad();pintar();}
-  catch(e){toast(mensaje(e));$('dia').value=D.fechaKey;}
+  const turno=++carga,key=S()&&S().key;cargando=true;limpiarPedido();$('bSig').disabled=true;
+  try{
+    const d=await rpc('datosFormulario');if(turno!==carga)return;d.recibido=Date.now();D=d;
+    let i=D.servicios.findIndex(s=>s.key===key&&s.disponible);if(i<0)i=D.servicios.findIndex(s=>s.disponible);
+    if(i<0){cargando=false;await cargar();return;}
+    srv=i;ajustarModalidad();pintar();programar();
+  }catch(e){toast(mensaje(e));}
   finally{if(turno===carga){cargando=false;totales();}}
 }
 function pintar(){
-  $('fecha').textContent=D.fecha;
-  $('dia').innerHTML=D.fechas.map(f=>'<option value="'+esc(f)+'"'+(f===D.fechaKey?' selected':'')+'>'+f.split('-').reverse().join('/')+(f===D.hoy?' · Hoy':'')+'</option>').join('');
-  $('srvs').innerHTML=D.servicios.map((s,i)=>'<button type="button" class="srv'+(i===srv?' on':'')+'" onclick="elegirServicio('+i+')"><b>'+esc(s.nombre)+'</b><small>'+esc(s.abre)+' – '+esc(s.cierra)+'</small><span class="st '+(s.disponible?'ok':'pr')+'">'+esc(estadoTxt(s))+'</span></button>').join('');
-  $('horario').textContent=S()?S().nombre+' · '+S().abre+' a '+S().cierra:'Sin servicios';
-  $('avisoHorario').textContent=!S()?'Configura los servicios en la hoja Menú.':
-    D.fechaKey!==D.hoy?'Menú programado. Podrás pedir ese día, dentro del horario indicado.':
-    !S().disponible?'Pedidos: '+S().abre+' a '+S().cierra+'. '+estadoTxt(S())+'.':
-    !opciones().length?'Esta modalidad no tiene opciones activas con precio.':'Pedidos abiertos · '+(modalidad==='Local'?'Consumo en local':'Recojo en el comedor');
-  document.querySelectorAll('#modalidades .pill').forEach(b=>{b.classList.toggle('on',b.dataset.v===modalidad);b.setAttribute('aria-pressed',b.dataset.v===modalidad);});
+  const s=S();
+  $('titulo').textContent=s?s.nombre+' de hoy':'Comedor';
+  $('fecha').textContent=fechaTxt(D.fechaKey);
+  $('horario').textContent=s?'Pedidos hasta las '+s.cierra:'—';
+  $('p2Tit').textContent='¿Qué vas a '+((s&&VERBO[s.key])||'pedir')+'?';
+  const abiertos=D.servicios.map((x,i)=>[x,i]).filter(a=>a[0].disponible);
+  $('srvs').hidden=abiertos.length<2;
+  $('srvs').innerHTML=abiertos.map(([x,i])=>'<button type="button" class="srv'+(i===srv?' on':'')+'" aria-pressed="'+(i===srv)+'" onclick="elegirServicio('+i+')"><b>'+esc(x.nombre)+'</b><small>hasta '+esc(x.cierra)+'</small></button>').join('');
+  document.querySelectorAll('#modalidades .pill').forEach(b=>{const v=b.dataset.v,hay=opcionesDe(v).length>0;
+    b.disabled=!hay;b.style.opacity=hay?'':'.45';b.classList.toggle('on',v===modalidad);b.setAttribute('aria-pressed',v===modalidad);});
+  const resta=s?Math.floor(aMin(s.cierra)-ahoraMin()):0;
+  $('avisoHorario').innerHTML=!s?'':!opciones().length?'Esta modalidad no tiene opciones con precio.':
+    (modalidad==='Local'?'Consumo en el comedor':'Para llevar: recoges en el comedor')+' · pedidos hasta las '+esc(s.cierra)+
+    (resta>0&&resta<=15?' · <span class="urge">quedan '+resta+' min</span>':'');
+  $('semanaP2').innerHTML=semanaHTML();
   pintarPlatos();totales();
 }
 function elegirServicio(i){if(enviando||cargando||i===srv)return;srv=i;limpiarPedido();ajustarModalidad();pintar();}
-function elegirModalidad(v){if(enviando||cargando||v===modalidad)return;modalidad=v;limpiarPedido();pintar();}
+function elegirModalidad(v){if(enviando||cargando||v===modalidad||!opcionesDe(v).length)return;modalidad=v;limpiarPedido();pintar();}
 function totalPlato(pl){return Object.values(cant[pl]||{}).reduce((a,b)=>a+b,0);}
 function pintarPlatos(){
-  const ops=opciones();
-  if(!S()||!S().platos.length){$('platos').innerHTML='<p class="vacio-msg">Sin platos programados para esta fecha y servicio.</p>';return;}
-  $('platos').innerHTML=S().platos.map((p,i)=>{
+  const ops=opciones(),s=S();
+  if(!s||!s.platos.length){$('platos').innerHTML='<p class="vacio-msg">Sin platos programados para hoy.</p>';return;}
+  // Con un solo plato, se muestran sus opciones directamente.
+  if(s.platos.length===1&&!(s.platos[0].plato in sel))sel[s.platos[0].plato]=true;
+  $('platos').innerHTML=s.platos.map((p,i)=>{
     if(!cant[p.plato])cant[p.plato]=Object.create(null);
-    const agot=p.quedan!==null&&p.quedan<=0;
-    const filas=ops.map((o,j)=>'<div class="tipo"><div class="tn"><b>'+esc(o.tipo)+'</b><small>'+soles(o.precio)+(o.incluye?' · '+esc(o.incluye):'')+'</small></div><div class="stp"><button type="button" aria-label="Quitar '+esc(o.tipo)+'" onclick="mover('+i+','+j+',-1)"'+(!(cant[p.plato][o.tipo]>0)?' disabled':'')+'>−</button><output>'+(cant[p.plato][o.tipo]||0)+'</output><button type="button" aria-label="Agregar '+esc(o.tipo)+'" onclick="mover('+i+','+j+',1)"'+(!puedePedir()||agot||(cant[p.plato][o.tipo]||0)>=D.max||(p.quedan!==null&&totalPlato(p.plato)>=p.quedan)?' disabled':'')+'>+</button></div></div>').join('');
-    const precio=ops.length?'Desde '+soles(Math.min(...ops.map(o=>o.precio))):'Sin precio activo para esta modalidad';
-    return '<div class="plato'+(sel[p.plato]?' sel':'')+(agot?' agotado':'')+'"><button type="button" class="plato-h" aria-expanded="'+!!sel[p.plato]+'" onclick="toggle('+i+')"><span class="ck">'+(sel[p.plato]?'✓':'')+'</span><span class="pn"><b>'+esc(p.plato)+'</b><small>'+precio+'</small></span><span class="badge '+(agot?'b-no':'b-ok')+'">'+(agot?'Agotado':p.quedan===null?'Disponible':'Quedan '+p.quedan)+'</span></button><div class="tipos"><div><div class="tipos-in">'+(filas||'<p class="hint" style="padding:12px 0">No hay opciones activas para esta modalidad.</p>')+'</div></div></div></div>';
+    const agot=p.quedan!==null&&p.quedan<=0,n=totalPlato(p.plato),abierto=!!sel[p.plato]&&!agot;
+    const filas=ops.map((o,j)=>{const c=cant[p.plato][o.tipo]||0;
+      return '<div class="tipo'+(c?' tiene':'')+'"><div class="tn"><b>'+esc(o.tipo)+'</b>'+(o.incluye?'<small>'+esc(o.incluye)+'</small>':'')+'</div><span class="px">'+soles(o.precio)+'</span><div class="stp"><button type="button" aria-label="Quitar '+esc(o.tipo)+'" onclick="mover('+i+','+j+',-1)"'+(c>0?'':' disabled')+'>−</button><output>'+c+'</output><button type="button" aria-label="Agregar '+esc(o.tipo)+'" onclick="mover('+i+','+j+',1)"'+(!puedePedir()||agot||c>=D.max||(p.quedan!==null&&n>=p.quedan)?' disabled':'')+'>+</button></div></div>';}).join('');
+    const precios=ops.length?ops.map(o=>esc(o.tipo)+' '+soles(o.precio)).join(' · '):'Sin opciones para esta modalidad';
+    const badge=agot?'<span class="badge b-no">Agotado</span>':p.quedan===null?'':'<span class="badge '+(p.quedan<=5?'b-poco':'b-ok')+'">Quedan '+p.quedan+'</span>';
+    return '<div class="plato'+(abierto?' sel':'')+(n?' con':'')+(abierto&&!n?' vacio':'')+(agot?' agotado':'')+'"><button type="button" class="plato-h" aria-expanded="'+abierto+'" onclick="toggle('+i+')"'+(agot?' disabled':'')+'><span class="ck">'+(n?'✓':'')+'</span><span class="pn"><b>'+esc(p.plato)+'</b><small>'+(n?n+' elegido'+(n>1?'s':'')+' · ':'')+precios+'</small></span>'+badge+'</button><div class="tipos"><div><div class="tipos-in">'+(filas||'<p class="hint" style="padding:12px 0">No hay opciones activas para esta modalidad.</p>')+'<p class="aviso-sel">Toca + en la opción que prefieras.</p></div></div></div></div>';
   }).join('');
 }
 function toggle(i){const p=S().platos[i];sel[p.plato]=!sel[p.plato];pintarPlatos();}
@@ -355,7 +434,7 @@ function lineas(){
 }
 function totales(){
   const ls=lineas(),n=ls.reduce((t,l)=>t+l.cant,0),sum=ls.reduce((t,l)=>t+l.cant*l.precio,0);
-  $('totN').textContent=n?n+' porciones':'Sin platos';$('totS').textContent=soles(sum);
+  $('totN').textContent=n?n+(n===1?' plato':' platos'):'Sin platos';$('totS').textContent=soles(sum);
   $('bSig').disabled=enviando||cargando||(paso===2&&(!puedePedir()||!n));
 }
 function ir(n){
@@ -375,9 +454,9 @@ function validarDatos(){
 function siguiente(){if(enviando||cargando)return;if(paso===1){if(validarDatos())ir(2);}else if(paso===2){if(puedePedir()&&lineas().length)ir(3);}else enviar();}
 function listaHTML(items,total){return items.map(l=>'<div class="res-l"><span><span class="q">'+l.cant+'×</span><b>'+esc(l.plato)+'</b> · '+esc(l.tipo)+'</span><span>'+soles(l.subtotal!==undefined?l.subtotal:l.cant*l.precio)+'</span></div>').join('')+'<div class="res-tot"><span>Total</span><span>'+soles(total)+'</span></div>';}
 function resumen(){
-  const ls=lineas();$('resTit').textContent=S().nombre+' · '+(modalidad==='Local'?'Consumo en local':'Recojo');
+  const ls=lineas();$('resTit').textContent=S().nombre+' · '+(modalidad==='Local'?'Consumo en local':'Para llevar');
   $('resumen').innerHTML=listaHTML(ls,ls.reduce((t,l)=>t+l.cant*l.precio,0));
-  $('resDatos').innerHTML='<dt>Fecha</dt><dd>'+esc(D.fecha)+'</dd><dt>Nombre</dt><dd>'+esc($('nombre').value.trim())+'</dd><dt>Registro / DNI</dt><dd>'+esc($('registro').value.trim())+'</dd><dt>Personal</dt><dd>'+esc(personal)+'</dd>';
+  $('resDatos').innerHTML='<dt>Fecha</dt><dd>'+esc(fechaTxt(D.fechaKey))+'</dd><dt>Nombre</dt><dd>'+esc($('nombre').value.trim())+'</dd><dt>Registro / DNI</dt><dd>'+esc($('registro').value.trim())+'</dd><dt>Personal</dt><dd>'+esc(personal)+'</dd>';
 }
 function ocupado(b){enviando=b;$('bAtras').disabled=b;$('bSig').textContent=b?'Enviando…':paso===3?'Enviar pedido':'Continuar';document.querySelectorAll('.editar').forEach(e=>e.disabled=b);totales();}
 async function enviar(){
@@ -389,17 +468,18 @@ async function enviar(){
   try{const r=await rpc('enviarPedido',pedido);listo(r);}
   catch(e){
     ocupado(false);toast(mensaje(e));
-    if(/precio|agot|quedan|menú|opción|cerrad|hoy/i.test(mensaje(e))){await cambiarFecha(D.fechaKey);ir(2);}
+    if(/precio|agot|quedan|menú|opción|cerrad|hoy/i.test(mensaje(e))){await refrescar();if($('cerrado').hidden)ir(2);}
   }
 }
 function listo(r){
+  recordar();clearTimeout(programar.t);
   ['p1','p2','p3','barra','pasos'].forEach(id=>$(id).hidden=true);
   $('okCodigo').textContent=r.codigo;$('okHora').textContent=r.servicio+' · '+r.modalidad+' · '+r.nombre+' · '+r.hora;
   $('okResumen').innerHTML=listaHTML(r.items,r.total);$('listo').hidden=false;window.scrollTo({top:0,behavior:'smooth'});
 }
 ['personal','descuento'].forEach(id=>$(id).addEventListener('click',e=>{const b=e.target.closest('.pill');if(!b||enviando)return;if(id==='personal')personal=b.dataset.v;else descuento=b.dataset.v;document.querySelectorAll('#'+id+' .pill').forEach(x=>x.classList.toggle('on',x===b));$('f-'+id).classList.remove('err');solicitud='';}));
 ['nombre','registro','obs'].forEach(id=>$(id).addEventListener('input',()=>{solicitud='';if($('f-'+id))$('f-'+id).classList.remove('err');}));
-cargar();
+recuperar();cargar();
 </script>
 </body>
 </html>
