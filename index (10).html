@@ -62,6 +62,8 @@ h2{font-size:17.5px;font-weight:700;letter-spacing:-.01em}
 .pn{flex:1;min-width:0}
 .pn b{display:block;font-size:16px;font-weight:600}
 .pn small{display:block;color:var(--sub);font-size:12.5px;margin-top:1px}
+.pn .ing{color:var(--texto);opacity:.8;margin-top:2px}
+.pn .nut{display:block;font-size:12px;color:var(--azul);margin-top:3px}.pn .nut b{display:inline;font-size:12px;font-weight:700}
 .badge{flex:none;font-size:12px;font-weight:600;border-radius:999px;padding:4px 10px;white-space:nowrap}
 .b-ok{background:var(--verdebg);color:var(--verde)}
 .b-poco{background:var(--ambarbg);color:var(--ambar)}
@@ -191,7 +193,7 @@ button:focus-visible,select:focus-visible{outline:3px solid #739edf;outline-offs
       <p class="hint" id="motivo"></p>
     </div>
     <div id="agenda"></div>
-    <div style="text-align:center"><button class="btn sec" style="margin-top:16px" onclick="cargar(true)">Actualizar</button></div>
+    <p class="hint" style="text-align:center;margin-top:16px">Esta página se actualiza sola.</p>
   </section>
 
   <!-- Paso 1 -->
@@ -231,7 +233,7 @@ button:focus-visible,select:focus-visible{outline:3px solid #739edf;outline-offs
 
   <!-- Paso 2 -->
   <section id="p2" class="card" hidden>
-    <div class="sec-h"><h2 id="p2Tit">¿Qué vas a pedir?</h2><button type="button" class="editar" onclick="actualizarMenu()">Actualizar menú</button></div>
+    <div class="sec-h"><h2 id="p2Tit">¿Qué vas a pedir?</h2></div>
     <p class="hint">Elige tu plato y luego la opción (completo, simple, económico…) con el botón +.</p>
     <div class="srvs" id="srvs" hidden></div>
     <div class="f"><div class="lab">¿Dónde lo vas a comer?</div><div class="pills" id="modalidades">
@@ -388,7 +390,40 @@ function ajustarModalidad(){
   const otra=modalidad==='Local'?'Recojo':'Local';
   if(opcionesDe(otra).length)modalidad=otra;
 }
-function actualizarMenu(){if(enviando||cargando)return;toast('Actualizando menú. Vuelve a seleccionar tus platos.');refrescar();}
+// La página consulta la hoja cada minuto: los cambios del menú, precios y stock aparecen solos
+// sin perder lo que la persona ya eligió.
+const firma=d=>JSON.stringify([d.servicios,d.semana,d.personal]);
+let ultimaSync=0;
+async function sincronizar(){
+  if(!D){if(!$('cerrado').hidden&&!cargando)cargar();return;}
+  if(enviando||cargando||!$('listo').hidden||paso===3&&$('cerrado').hidden)return;
+  ultimaSync=Date.now();
+  let d;try{d=await rpc('datosFormulario');}catch(e){return;}
+  if(enviando||cargando||!$('listo').hidden||paso===3&&$('cerrado').hidden)return;
+  d.recibido=Date.now();
+  if(firma(d)===firma(D)){D.ahora=d.ahora;D.recibido=d.recibido;return;}
+  if(!$('cerrado').hidden){
+    if(d.servicios.some(s=>s.disponible))return cargar();
+    D=d;return mostrarCerrado();
+  }
+  const key=S()&&S().key,i=d.servicios.findIndex(s=>s.key===key&&s.disponible);
+  if(i<0)return cargar();
+  const antes=lineas();
+  D=d;srv=i;ajustarModalidad();
+  // Quita lo que ya no existe, respeta el stock y avisa si algo cambió.
+  const ops=opciones(),tipos=new Set(ops.map(o=>o.tipo));let cambio=false;
+  Object.keys(cant).forEach(pl=>{
+    const p=S().platos.find(x=>x.plato===pl);
+    if(!p){if(totalPlato(pl))cambio=true;delete cant[pl];delete sel[pl];return;}
+    Object.keys(cant[pl]).forEach(t=>{if(!tipos.has(t)&&cant[pl][t]){cambio=true;delete cant[pl][t];}});
+    if(p.quedan!==null)ops.forEach(o=>{const exceso=totalPlato(pl)-p.quedan,c=cant[pl][o.tipo]||0;if(exceso>0&&c){const q=Math.min(c,exceso);cant[pl][o.tipo]=c-q;cambio=true;}});
+  });
+  if(antes.some(l=>{const o=ops.find(x=>x.tipo===l.tipo);return o&&o.precio!==l.precio;}))cambio=true;
+  if(cambio){solicitud='';toast('El menú se actualizó. Revisa tu pedido.');}
+  pintar();programar();
+}
+setInterval(()=>{if(document.visibilityState==='visible')sincronizar();},60000);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&Date.now()-ultimaSync>20000)sincronizar();});
 async function refrescar(){
   if(enviando)return;
   const turno=++carga,key=S()&&S().key;cargando=true;limpiarPedido();$('bSig').disabled=true;
@@ -432,8 +467,9 @@ function pintarPlatos(){
     const filas=ops.map((o,j)=>{const c=cant[p.plato][o.tipo]||0;
       return '<div class="tipo'+(c?' tiene':'')+'"><div class="tn"><b>'+esc(o.tipo)+'</b>'+(o.incluye?'<small>'+esc(o.incluye)+'</small>':'')+'</div><span class="px">'+soles(o.precio)+'</span><div class="stp"><button type="button" aria-label="Quitar '+esc(o.tipo)+'" onclick="mover('+i+','+j+',-1)"'+(c>0?'':' disabled')+'>−</button><output>'+c+'</output><button type="button" aria-label="Agregar '+esc(o.tipo)+'" onclick="mover('+i+','+j+',1)"'+(!puedePedir()||agot||c>=D.max||(p.quedan!==null&&n>=p.quedan)?' disabled':'')+'>+</button></div></div>';}).join('');
     const precios=ops.length?ops.map(o=>esc(o.tipo)+' '+soles(o.precio)).join(' · '):'Sin opciones para esta modalidad';
+    const nut=[[p.kcal,'','kcal'],[p.proteinas,' g','proteína'],[p.grasas,' g','grasa']].filter(x=>x[0]!=null&&x[0]!=='').map(x=>'<b>'+esc(x[0])+x[1]+'</b> '+x[2]).join(' · ');
     const badge=agot?'<span class="badge b-no">Agotado</span>':p.quedan===null?'':'<span class="badge '+(p.quedan<=5?'b-poco':'b-ok')+'">Quedan '+p.quedan+'</span>';
-    return '<div class="plato'+(abierto?' sel':'')+(n?' con':'')+(abierto&&!n?' vacio':'')+(agot?' agotado':'')+'"><button type="button" class="plato-h" aria-expanded="'+abierto+'" onclick="toggle('+i+')"'+(agot?' disabled':'')+'><span class="ck">'+(n?'✓':'')+'</span><span class="pn"><b>'+esc(p.plato)+'</b><small>'+(n?n+' elegido'+(n>1?'s':'')+' · ':'')+precios+'</small></span>'+badge+'</button><div class="tipos"><div><div class="tipos-in">'+(filas||'<p class="hint" style="padding:12px 0">No hay opciones activas para esta modalidad.</p>')+'<p class="aviso-sel">Toca + en la opción que prefieras.</p></div></div></div></div>';
+    return '<div class="plato'+(abierto?' sel':'')+(n?' con':'')+(abierto&&!n?' vacio':'')+(agot?' agotado':'')+'"><button type="button" class="plato-h" aria-expanded="'+abierto+'" onclick="toggle('+i+')"'+(agot?' disabled':'')+'><span class="ck">'+(n?'✓':'')+'</span><span class="pn"><b>'+esc(p.plato)+'</b>'+(p.ingredientes?'<small class="ing">'+esc(p.ingredientes)+'</small>':'')+(nut?'<span class="nut">'+nut+'</span>':'')+'<small>'+(n?n+' elegido'+(n>1?'s':'')+' · ':'')+precios+'</small></span>'+badge+'</button><div class="tipos"><div><div class="tipos-in">'+(filas||'<p class="hint" style="padding:12px 0">No hay opciones activas para esta modalidad.</p>')+'<p class="aviso-sel">Toca + en la opción que prefieras.</p></div></div></div></div>';
   }).join('');
 }
 function toggle(i){const p=S().platos[i];sel[p.plato]=!sel[p.plato];pintarPlatos();}

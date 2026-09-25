@@ -2,12 +2,14 @@
 // • Hoja "Menú": se programa el menú de toda la semana (Fecha · Servicio · Plato · Stock).
 // • Panel (J:L): horario de cada servicio. Cada uno abre y cierra solo.
 // • Hoja "Precios": opciones por servicio y modalidad (Local / Recojo).
+// • Hoja "Platos": ingredientes, kcal, proteínas y grasas de cada plato (se llena una vez por plato).
 // • HTML "index": consulta por fecha; pedidos de hoy dentro del horario de cada servicio.
 // • Un pedido por persona por servicio por día. Para anular: "Anulado" en la columna Estado de "Pedidos".
 
 const HOJA_MENU = 'Menú';
 const HOJA_PRECIOS = 'Precios';
 const HOJA_PEDIDOS = 'Pedidos';
+const HOJA_PLATOS = 'Platos';                   // Ingredientes y valores nutricionales de cada plato
 const MAX_POR_PERSONA = 10;          // máximo por opción en un pedido
 const FILAS_MENU = 300;              // filas disponibles para programar el menú
 const AZUL = '#1f3864', AZUL_CLARO = '#dde5f3', GRIS = '#f3f3f3', AMARILLO = '#fffbea';
@@ -48,6 +50,7 @@ function onOpen() {
   SpreadsheetApp.getUi().createMenu('🍽️ Comedor')
     .addItem('📄 Reporte para mozos (PDF)', 'reporteAMozos_')
     .addItem('🔗 Ver link de pedidos', 'verLink_')
+    .addItem('🥗 Agregar platos nuevos a "Platos"', 'agregarPlatos_')
     .addSeparator()
     .addItem('Recalcular pedidos ahora', 'actualizarStock_')
     .addItem('Reparar diseño y activadores', 'configurarTodo_')
@@ -126,14 +129,16 @@ function doGet() {
 function datosFormulario(fecha) {
   const actual = hoyKey_(), hoy = fecha ? fechaKey_(fecha) : actual, ahora = minutosAhora_();
   if (!hoy) throw new Error('Fecha no válida.');
-  const opciones = leerOpciones_(), menu = leerMenuTodo_(), servs = leerServicios_();
+  const opciones = leerOpciones_(), menu = leerMenuTodo_(), servs = leerServicios_(), fichas = leerPlatos_();
   const menuHoy = unicos_(menu.filter(m => m.fecha === hoy));
   const usados = usados_(leerLineas_(hoy, false));
 
   const servicios = servs.map(s => {
     const platos = menuHoy.filter(m => m.sKey === s.key).map(m => {
       const u = usados[claveUso_(hoy, s.key, m.plato)] || 0;
-      return { plato: m.plato, stock: m.stock, quedan: m.stock == null ? null : Math.max(0, m.stock - u) };
+      const f = fichas[keyS_(m.plato)] || {};
+      return { plato: m.plato, stock: m.stock, quedan: m.stock == null ? null : Math.max(0, m.stock - u),
+        ingredientes: f.ingredientes || '', kcal: f.kcal, proteinas: f.proteinas, grasas: f.grasas };
     });
     const ops = opciones[s.key] || [];
     const estado = ahora < s.abre ? 'pronto' : (ahora < s.cierra ? 'abierto' : 'cerrado');
@@ -372,6 +377,54 @@ function modalidad_(v) {
 }
 function activo_(v) { return v === true || ['si', 'true', 'x'].includes(keyS_(v)); }
 
+// ---------------------------------------------------------------- Hoja Platos (ficha nutricional)
+const CAB_PLATOS = ['Plato', 'Ingredientes / acompañamiento', 'Kcal', 'Proteínas (g)', 'Grasas (g)'];
+
+function hojaPlatos_() {
+  const ss = ss_();
+  let sh = ss.getSheetByName(HOJA_PLATOS);
+  if (sh) return sh;
+  sh = ss.insertSheet(HOJA_PLATOS);
+  sh.getRange(1, 1, 1, CAB_PLATOS.length).setValues([CAB_PLATOS]).setFontWeight('bold')
+    .setBackground(AZUL).setFontColor('#ffffff').setWrap(true).setVerticalAlignment('middle');
+  sh.setFrozenRows(1);
+  [230, 380, 70, 100, 90].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  sh.getRange('B2:B').setWrap(true);
+  sh.getRange('C2:E').setHorizontalAlignment('center').setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireNumberGreaterThanOrEqualTo(0).setHelpText('Número por porción (ej. 520). Déjalo vacío si no lo sabes.').setAllowInvalid(false).build());
+  sh.getRange('A1').setNote('Los platos del menú se agregan solos. Completa ingredientes y valores por porción: se muestran en el formulario. Lo que quede vacío no se muestra.');
+  return sh;
+}
+
+// Clave del plato → ficha. Se busca sin distinguir mayúsculas ni tildes.
+function leerPlatos_() {
+  const sh = ss_().getSheetByName(HOJA_PLATOS), out = Object.create(null);
+  if (!sh || sh.getLastRow() < 2) return out;
+  const num = v => (v === '' || v == null || !Number.isFinite(Number(v))) ? null : Math.round(Number(v));
+  sh.getRange(2, 1, sh.getLastRow() - 1, CAB_PLATOS.length).getValues().forEach(r => {
+    const k = keyS_(r[0]);
+    if (k) out[k] = { ingredientes: String(r[1] || '').trim(), kcal: num(r[2]), proteinas: num(r[3]), grasas: num(r[4]) };
+  });
+  return out;
+}
+
+// Agrega a "Platos" los platos del menú que aún no están.
+function sincronizarPlatos_() {
+  const sh = hojaPlatos_(), existentes = leerPlatos_(), nuevos = [];
+  leerMenuTodo_().forEach(m => {
+    const k = keyS_(m.plato);
+    if (!(k in existentes)) { existentes[k] = {}; nuevos.push([m.plato]); }
+  });
+  if (nuevos.length) sh.getRange(sh.getLastRow() + 1, 1, nuevos.length, 1).setValues(nuevos);
+  return nuevos.length;
+}
+
+function agregarPlatos_() {
+  const n = sincronizarPlatos_();
+  ss_().setActiveSheet(hojaPlatos_());
+  aviso_(n ? '✅ Se agregaron ' + n + ' platos a la hoja "Platos". Completa sus ingredientes y valores.' : 'La hoja "Platos" ya tiene todos los platos del menú.');
+}
+
 function leerPersonal_() {
   const sh = hojaPrecios_();
   const n = Math.max(sh.getLastRow() - 1, 1);
@@ -556,6 +609,9 @@ function alEditar_(e) {
   const enPedidos = nombre === HOJA_PEDIDOS && e.range.getLastColumn() >= 15;
   if (enMenu || enPedidos || nombre === HOJA_PRECIOS) {
     try { actualizarStock_(); } catch (err) { Logger.log(err); }
+  }
+  if (nombre === HOJA_MENU && c <= 3 && e.range.getLastColumn() >= 3 && e.range.getLastRow() > 1) {
+    try { sincronizarPlatos_(); } catch (err) { Logger.log(err); }
   }
 }
 
@@ -845,6 +901,7 @@ function configurarTodo_() {
 
   configurarPrecios_();
   hojaPedidos_();
+  sincronizarPlatos_();
   disenarHoja_();
 
   ss.setActiveSheet(sh);
