@@ -596,57 +596,118 @@ function abrirCarpetaVales_() {
     '<script>window.open(' + JSON.stringify(url) + ',"_blank");</script>').setWidth(380).setHeight(130), 'Vales de consumo');
 }
 
-// Mismo formato que el vale impreso: comedor, datos, filas por servicio, total y descuento por planilla.
+// Vale en una hoja horizontal de 15 × 10.5 cm (se arma en Google Docs y se exporta a PDF).
+const VALE_ANCHO = 425, VALE_ALTO = 298, VALE_MARGEN = 14;   // puntos (1 cm = 28.35 pt)
+
 function valePdf_(v) {
-  const k = v.sKey, casilla = on => '<td class="box">' + (on ? 'X' : '&nbsp;') + '</td>';
-  const cant = v.items.reduce((t, i) => t + i.cant, 0);
+  const DA = DocumentApp, A = DA.Attribute;
+  const doc = DA.create('tmp-vale-' + numeroVale_(v));
+  const body = doc.getBody();
+  body.setPageWidth(VALE_ANCHO).setPageHeight(VALE_ALTO)
+    .setMarginTop(VALE_MARGEN).setMarginBottom(VALE_MARGEN).setMarginLeft(VALE_MARGEN + 4).setMarginRight(VALE_MARGEN + 4);
+  const util = VALE_ANCHO - 2 * (VALE_MARGEN + 4);
+  const txt = s => String(s == null ? '' : s).replace(/^'/, '');
+  const box = on => on ? '☒' : '☐';
+
+  // Da formato a todas las celdas de una tabla: tamaño de letra, sin espacios extra y relleno mínimo.
+  const formato = (t, tam, anchos, borde) => {
+    t.setBorderWidth(borde ? 0.75 : 0).setBorderColor('#555555');
+    anchos.forEach((w, i) => t.setColumnWidth(i, w));
+    for (let r = 0; r < t.getNumRows(); r++) {
+      const fila = t.getRow(r);
+      for (let c = 0; c < fila.getNumCells(); c++) {
+        const cel = fila.getCell(c);
+        cel.setPaddingTop(1).setPaddingBottom(1).setPaddingLeft(3).setPaddingRight(3).setVerticalAlignment(DA.VerticalAlignment.CENTER);
+        for (let k = 0; k < cel.getNumChildren(); k++) {
+          const p = cel.getChild(k).asParagraph();
+          p.setSpacingBefore(0).setSpacingAfter(0).setLineSpacing(1);
+          p.setAttributes({ [A.FONT_SIZE]: tam, [A.FONT_FAMILY]: 'Arial' });
+        }
+      }
+    }
+    return t;
+  };
+  const estilo = (cel, o) => {
+    const t = cel.editAsText();
+    if (!t.getText().length) return;
+    if (o.b) t.setBold(true);
+    if (o.i) t.setItalic(true);
+    if (o.tam) t.setFontSize(o.tam);
+    if (o.color) t.setForegroundColor(o.color);
+    if (o.al) cel.getChild(0).asParagraph().setAlignment(o.al);
+  };
+  const sep = alto => body.appendParagraph('').setSpacingBefore(0).setSpacingAfter(0).setLineSpacing(1)
+    .setAttributes({ [A.FONT_SIZE]: alto });
+  const H = DA.HorizontalAlignment;
+
+  // Encabezado
+  const p0 = body.getParagraphs()[0];
+  p0.setSpacingBefore(0).setSpacingAfter(0).setAttributes({ [A.FONT_SIZE]: 2 });
+  const cab = formato(body.appendTable([
+    ['sodexo', 'VALE DE CONSUMO', 'N° ' + numeroVale_(v)],
+    ['Comedor Staff Ilo ' + box(COMEDOR === 'Staff Ilo') + '    Comedor Hospital ' + box(COMEDOR === 'Hospital'), '', 'Fecha: ' + fechaVale_(v)]
+  ]), 9, [110, 160, util - 270], false);
+  estilo(cab.getCell(0, 0), { b: true, i: true, tam: 17, color: '#2a295c' });
+  estilo(cab.getCell(0, 1), { i: true, tam: 13, al: H.CENTER });
+  estilo(cab.getCell(0, 2), { tam: 12, al: H.RIGHT });
+  estilo(cab.getCell(1, 2), { b: true, al: H.RIGHT });
+  sep(3);
+
+  // Datos de la persona
+  const tipos = ['SPCC', 'Funcionario', 'Empleado', 'Contratista'];
+  let tipoTxt = tipos.map(p => p + ' ' + box(keyS_(p) === keyS_(v.personal))).join('     ');
+  if (!tipos.some(p => keyS_(p) === keyS_(v.personal))) tipoTxt += '     ' + txt(v.personal) + ' ☒';
+  const datos = formato(body.appendTable([
+    ['Nombre:', txt(v.nombre), 'Registro/DNI:', txt(v.registro)],
+    ['Personal:', tipoTxt, '', ''],
+    ['Empresa:', txt(v.empresa), 'Dpto./Área:', txt(v.area)],
+    ['Cuenta:', '', '', '']
+  ]), 8.5, [52, 190, 62, util - 304], true);
+  [[0, 1], [0, 3], [2, 1], [2, 3]].forEach(rc => estilo(datos.getCell(rc[0], rc[1]), { b: true }));
+  sep(3);
+
+  // Servicios: cantidad, precio y firma
   const filasSrv = [['Desayuno', /^desayuno/], ['Almuerzo', /^almuerzo/], ['Cena', /^cena/], ['Rancho', /rancho/]];
-  let usada = filasSrv.findIndex(f => f[1].test(k));
-  const etiquetas = filasSrv.map(f => f[0]).concat([usada < 0 ? v.servicio : '']);
-  if (usada < 0) usada = 4;
-  const linea = (et, val) => '<tr><td class="et">' + et + '</td><td class="lin">' + html_(val) + '</td></tr>';
-  const personal = ['SPCC', 'Funcionario', 'Empleado', 'Contratista'];
-  const html = '<html><head><meta charset="utf-8"><style>' +
-    'body{font-family:Arial,Helvetica,sans-serif;font-size:11pt;color:#111}' +
-    'table{border-collapse:collapse}td{padding:3px 5px;vertical-align:middle}' +
-    '.vale{border:1.5px solid #333;padding:10px 16px}' +
-    '.logo{font-size:24pt;font-weight:bold;font-style:italic;color:#2a295c}' +
-    '.tit{font-size:17pt;font-style:italic;text-align:center}.num{font-size:17pt;text-align:right;white-space:nowrap}' +
-    '.box{border:1px solid #333;width:24px;height:16px;text-align:center;font-weight:bold;font-size:10pt}' +
-    '.et{width:170px;white-space:nowrap}.lin{border-bottom:1px solid #333;font-weight:bold}' +
-    '.g td{border:1px solid #333;height:22px}.g .sin{border:0}.g th{font-size:11pt;padding:3px}' +
-    '.det{font-size:9.5pt;color:#333}.det td{padding:1px 6px 1px 0}' +
-    '</style></head><body><div class="vale">' +
-    '<table style="width:100%"><tr><td class="logo">sodexo</td><td></td>' +
-    '<td style="text-align:right">Fecha&nbsp;</td><td class="box" style="width:130px;font-size:11pt">' + fechaVale_(v) + '</td></tr></table>' +
-    '<table style="width:100%"><tr><td style="width:190px"><table>' +
-    '<tr><td>Comedor Staff Ilo</td>' + casilla(COMEDOR === 'Staff Ilo') + '</tr>' +
-    '<tr><td>Comedor Hospital</td>' + casilla(COMEDOR === 'Hospital') + '</tr></table></td>' +
-    '<td class="tit">VALE DE CONSUMO</td><td class="num">N° ' + html_(numeroVale_(v)) + '</td></tr></table>' +
-    '<table style="width:100%;margin-top:6px">' + linea('Nombre:', v.nombre) +
-    '<tr><td></td><td><table style="margin:3px 0"><tr>' + personal.map(p => '<td>' + p + '</td>' + casilla(keyS_(p) === keyS_(v.personal))).join('<td>&nbsp;&nbsp;</td>') +
-    (personal.some(p => keyS_(p) === keyS_(v.personal)) ? '' : '<td>&nbsp;&nbsp;' + html_(v.personal) + '</td>' + casilla(true)) + '</tr></table></td></tr>' +
-    linea('Registro/DNI:', v.registro) + linea('Empresa:', v.empresa) +
-    linea('Dpto. / Sección / Área:', v.area) + linea('Cuenta:', '') + '</table>' +
-    '<table class="g" style="width:100%;margin-top:10px"><tr><th class="sin" style="border:0"></th><th>Cant.</th><th>Precio S/</th><th>Firma</th></tr>' +
-    etiquetas.map((et, i) => '<tr><td class="sin" style="border:0;width:150px">' + html_(et) + '</td>' +
-      '<td style="text-align:center;font-weight:bold;width:110px">' + (i === usada ? cant : '') + '</td>' +
-      '<td style="width:130px">S/ <b>' + (i === usada ? v.total.toFixed(2) : '') + '</b></td>' +
-      '<td style="font-size:8.5pt;color:#444">' + (i === usada ? (v.firma ? '<img src="' + v.firma + '" style="height:34px">' : 'Pedido web · código ' + html_(v.codigo)) : '') + '</td></tr>').join('') +
-    '</table>' +
-    '<table style="width:100%;margin-top:8px"><tr><td style="width:260px;text-align:right">CONSUMO TOTAL</td>' +
-    '<td class="box" style="width:auto;text-align:left;font-size:12pt">S/ ' + v.total.toFixed(2) + '</td></tr></table>' +
-    '<table style="margin:6px 0 0 260px"><tr>' + casilla(v.descuento === 'Sí') + '<td>Sujeto a descuento por Planilla</td></tr>' +
-    '<tr>' + casilla(v.descuento === 'No') + '<td>NO sujeto a descuento por Planilla' +
-    (v.pago ? ' &nbsp;·&nbsp; Pago: <b>' + html_(v.pago) + '</b>' : '') + '</td></tr></table>' +
-    '<table class="det" style="width:100%;margin-top:10px;border-top:1px dashed #999"><tr><td colspan="2" style="padding-top:6px"><b>Detalle</b> · ' +
-    html_(v.servicio) + ' · ' + (v.modalidad === 'Recojo' ? 'Para llevar' : 'Consumo en local') + ' · Registrado ' + html_(v.hora) + '</td></tr>' +
-    v.items.map(i => '<tr><td>' + i.cant + ' × ' + html_(i.plato) + ' · ' + html_(i.tipo) + ' (S/ ' + i.precio.toFixed(2) + ')</td>' +
-      '<td style="text-align:right">S/ ' + i.subtotal.toFixed(2) + '</td></tr>').join('') +
-    (v.obs ? '<tr><td colspan="2">Obs.: ' + html_(v.obs) + '</td></tr>' : '') +
-    '</table></div></body></html>';
-  return Utilities.newBlob(html, MimeType.HTML, 'vale.html').getAs(MimeType.PDF)
-    .setName('Vale ' + numeroVale_(v) + ' - ' + String(v.nombre).replace(/^'/, '').replace(/[\\/:*?"<>|]/g, '') + '.pdf');
+  let usada = filasSrv.findIndex(f => f[1].test(v.sKey));
+  const etiquetas = filasSrv.map(f => f[0]);
+  if (usada < 0) { etiquetas.push(txt(v.servicio)); usada = etiquetas.length - 1; }
+  const cant = v.items.reduce((t, i) => t + i.cant, 0);
+  const grid = formato(body.appendTable([['', 'Cant.', 'Precio S/', 'Firma']].concat(etiquetas.map((et, i) =>
+    [et, i === usada ? String(cant) : '', 'S/ ' + (i === usada ? v.total.toFixed(2) : ''), i === usada && !v.firma ? 'Pedido web · ' + v.codigo : '']))),
+    8.5, [80, 55, 80, util - 215], true);
+  for (let c = 0; c < 4; c++) { estilo(grid.getCell(0, c), { b: true, al: H.CENTER }); grid.getCell(0, c).setBackgroundColor('#eef2f9'); }
+  estilo(grid.getCell(usada + 1, 1), { b: true, al: H.CENTER });
+  estilo(grid.getCell(usada + 1, 2), { b: true });
+  if (v.firma) {
+    const img = grid.getCell(usada + 1, 3).getChild(0).asParagraph().setAlignment(H.CENTER)
+      .appendInlineImage(Utilities.newBlob(Utilities.base64Decode(v.firma.split(',')[1]), 'image/png', 'firma.png'));
+    const alto = 26;
+    img.setWidth(Math.round(img.getWidth() * alto / img.getHeight())).setHeight(alto);
+  }
+  sep(3);
+
+  // Total y descuento por planilla
+  const pie = formato(body.appendTable([
+    [box(v.descuento === 'Sí') + '  Sujeto a descuento por Planilla', 'CONSUMO TOTAL'],
+    [box(v.descuento === 'No') + '  NO sujeto a descuento por Planilla' + (v.pago ? '   ·   Pago: ' + v.pago : ''), 'S/ ' + v.total.toFixed(2)]
+  ]), 9, [util - 120, 120], false);
+  estilo(pie.getCell(0, 1), { b: true, al: H.RIGHT });
+  estilo(pie.getCell(1, 1), { b: true, tam: 13, al: H.RIGHT });
+  sep(3);
+
+  // Detalle
+  const det = body.appendParagraph('Detalle: ' + txt(v.servicio) + ' · ' + (v.modalidad === 'Recojo' ? 'Para llevar' : 'Consumo en local') +
+    ' · ' + v.items.map(i => i.cant + '× ' + txt(i.plato) + ' ' + txt(i.tipo) + ' (S/ ' + i.precio.toFixed(2) + ')').join(', ') +
+    (v.obs ? ' · Obs.: ' + txt(v.obs) : '') + ' · Registrado ' + v.hora);
+  det.setSpacingBefore(0).setSpacingAfter(0).setLineSpacing(1);
+  det.editAsText().setFontSize(7).setForegroundColor('#444444').setFontFamily('Arial');
+
+  doc.saveAndClose();
+  const archivo = DriveApp.getFileById(doc.getId());
+  const pdf = archivo.getAs(MimeType.PDF)
+    .setName('Vale ' + numeroVale_(v) + ' - ' + txt(v.nombre).replace(/[\\/:*?"<>|]/g, '') + '.pdf');
+  archivo.setTrashed(true);
+  return pdf;
 }
 
 // ---------------------------------------------------------------- Link
