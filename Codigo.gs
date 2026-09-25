@@ -38,7 +38,8 @@ const PRECIOS_DEF = [
 const CAB_PED = ['Fecha y hora', 'Código', 'Fecha consumo', 'Servicio', 'Nombre completo', 'Tipo de personal',
   'Registro / DNI', 'Plato', 'Opción', 'Cantidad', 'Precio unit.', 'Subtotal', 'Descuento planilla', 'Observaciones', 'Estado', 'Modalidad', 'Solicitud ID',
   'Correo', 'Empresa', 'Dpto. / Área', 'Vale PDF'];
-const COL_VALE = 21;                            // columna "Vale PDF" en Pedidos
+const COL_CORREO = 18, COL_VALE = 21;           // columnas "Correo" y "Vale PDF" en Pedidos
+const MAX_COPIAS = 5;                           // copias por correo que se pueden pedir de un mismo vale
 
 // Panel de control en la hoja Menú (columnas J:L)
 const P = {
@@ -165,14 +166,43 @@ function datosFormulario(fecha) {
 }
 
 // Recibe el pedido, valida todo con bloqueo y lo guarda
-// Registra el pedido y luego genera el vale en PDF: lo guarda en Drive y lo envía al correo del trabajador.
+// Registra el pedido y guarda su vale en PDF en Drive (copia del administrador).
 function enviarPedido(p) {
   const v = registrarPedido_(p || {});
-  let envio = '';
-  try { envio = enviarVale_(v); } catch (e) { Logger.log('Vale ' + v.codigo + ': ' + e); envio = 'error'; }
+  try { guardarVale_(v); } catch (e) { Logger.log('Vale ' + v.codigo + ': ' + e); }
   return { codigo: v.codigo, servicio: v.servicio, modalidad: v.modalidad, hora: v.hora, nombre: v.nombre,
-    registro: v.registro, correo: v.correo, envio: envio, items: v.items, total: v.total };
+    registro: v.registro, items: v.items, total: v.total };
 }
+
+// Lo llama la pantalla final: envía una copia del vale al correo que escriba el trabajador.
+function enviarCopiaVale(p) {
+  p = p || {};
+  const solicitud = String(p.solicitud || ''), correo = limpiar_(p.correo, 120).toLowerCase();
+  if (!/^[a-zA-Z0-9-]{16,80}$/.test(solicitud)) throw new Error('No se encontró tu pedido. Pide tu vale en el comedor.');
+  if (!correoValido_(correo)) throw new Error('Escribe un correo válido.');
+  let lineas = leerLineas_(hoyKey_(), false).filter(l => l.solicitud === solicitud);
+  if (!lineas.length) lineas = leerLineas_(null, false).filter(l => l.solicitud === solicitud);
+  if (!lineas.length) throw new Error('No se encontró tu pedido. Pide tu vale en el comedor.');
+  const cache = CacheService.getScriptCache(), clave = 'copias-' + solicitud, n = Number(cache.get(clave) || 0);
+  if (n >= MAX_COPIAS) throw new Error('Ya se enviaron ' + MAX_COPIAS + ' copias de este vale.');
+  if (MailApp.getRemainingDailyQuota() < 1) throw new Error('Hoy ya no se pueden enviar más correos. Pide tu vale en el comedor.');
+
+  const v = comprobante_(lineas);
+  const id = (v.vale.match(/\/d\/([-\w]+)/) || [])[1];
+  let pdf = null;
+  if (id) try { pdf = DriveApp.getFileById(id).getBlob(); } catch (e) { Logger.log(e); }
+  if (!pdf) pdf = guardarVale_(v) || valePdf_(v);
+  correoVale_(v, correo, pdf);
+  cache.put(clave, String(n + 1), 21600);
+
+  const lista = v.correo.split(/,\s*/).filter(String);
+  if (lista.indexOf(correo) < 0) lista.push(correo);
+  const sh = hojaPedidos_();
+  v.filas.forEach(f => sh.getRange(f, COL_CORREO).setValue(lista.join(', ')));
+  return { correo: correo };
+}
+
+function correoValido_(c) { return /^[^\s@']+@[^\s@]+\.[^\s@]{2,}$/.test(c); }
 
 function registrarPedido_(p) {
   const lock = LockService.getScriptLock();
@@ -183,14 +213,12 @@ function registrarPedido_(p) {
     const personal = String(p.personal || '');
     const descuento = p.descuento === 'No' ? 'No' : (p.descuento === 'Sí' ? 'Sí' : '');
     const obs = limpiar_(p.obs, 200);
-    const correo = limpiar_(p.correo, 120).toLowerCase();
     const empresa = limpiar_(p.empresa, 60), area = limpiar_(p.area, 60);
 
     if (nombre.split(/\s+/).length < 2 || nombre.length < 5) throw new Error('Escribe tu nombre completo.');
     if (!/^[A-Z0-9][A-Z0-9 .-]{3,19}$/.test(registro)) throw new Error('Escribe tu Registro o DNI.');
     if (leerPersonal_().indexOf(personal) < 0) throw new Error('Elige tu tipo de personal.');
     if (!descuento) throw new Error('Indica si el consumo es con descuento por planilla.');
-    if (!/^[^\s@']+@[^\s@]+\.[^\s@]{2,}$/.test(correo)) throw new Error('Escribe un correo válido para enviarte tu vale.');
 
     const s = leerServicios_().filter(x => x.key === keyS_(p.servicio))[0];
     if (!s) throw new Error('Elige un servicio.');
@@ -251,7 +279,7 @@ function registrarPedido_(p) {
     const fechaHora = new Date(), fTxt = hoyTxt_();
     const filas = items.map(i => [fechaHora, codigo, fTxt, s.nombre, nombre, personal, registro, i.plato, i.tipo, i.cant,
       precio[i.tipo], Math.round(i.cant * precio[i.tipo] * 100) / 100, descuento, obs, '', modalidad, solicitud,
-      correo, empresa, area, '']);
+      '', empresa, area, '']);
     const sh = hojaPedidos_(), fila = sh.getLastRow() + 1;
     sh.getRange(fila, 1, filas.length, CAB_PED.length).setValues(filas);
     SpreadsheetApp.flush();
@@ -259,7 +287,7 @@ function registrarPedido_(p) {
 
     return comprobante_(items.map((i, n) => ({ hora: fechaHora, codigo: codigo, fecha: hoy, servicio: s.nombre, sKey: s.key,
       nombre: nombre, personal: personal, registro: registro, plato: i.plato, tipo: i.tipo, cant: i.cant, precio: precio[i.tipo],
-      descuento: descuento, obs: obs, modalidad: modalidad, solicitud: solicitud, correo: correo, empresa: empresa, area: area,
+      descuento: descuento, obs: obs, modalidad: modalidad, solicitud: solicitud, correo: '', empresa: empresa, area: area,
       vale: '', fila: fila + n })));
   } finally {
     lock.releaseLock();
@@ -495,20 +523,24 @@ function html_(s) { return String(s == null ? '' : s).replace(/^'/, '').replace(
 function numeroVale_(v) { return v.fechaKey.replace(/-/g, '') + '-' + v.codigo; }
 function fechaVale_(v) { return v.fechaKey.split('-').reverse().join('/'); }
 
-// Genera el vale una sola vez por pedido: lo guarda en Drive, anota el link en Pedidos y lo envía por correo.
-function enviarVale_(v) {
+// Genera el vale una sola vez por pedido, lo guarda en Drive y anota el link en Pedidos.
+// Devuelve el PDF, o null si ya estaba guardado.
+function guardarVale_(v) {
   const cache = CacheService.getScriptCache(), clave = 'vale-' + v.solicitud;
-  if (v.vale || cache.get(clave)) return v.correo ? 'enviado' : '';
+  if (v.vale || cache.get(clave)) return null;
   cache.put(clave, '1', 21600);
   const pdf = valePdf_(v);
   const archivo = carpetaVales_(v.fechaKey).createFile(pdf);
   const sh = hojaPedidos_();
   v.filas.forEach(f => sh.getRange(f, COL_VALE).setValue(archivo.getUrl()));
-  if (!v.correo) return '';
-  if (MailApp.getRemainingDailyQuota() < 1) return 'error';
+  v.vale = archivo.getUrl();
+  return pdf;
+}
+
+function correoVale_(v, correo, pdf) {
   const modo = v.modalidad === 'Recojo' ? 'para llevar' : 'consumo en local';
   MailApp.sendEmail({
-    to: v.correo, name: 'Comedor Sodexo', attachments: [pdf],
+    to: correo, name: 'Comedor Sodexo', attachments: [pdf],
     subject: 'Vale de consumo N° ' + numeroVale_(v) + ' · ' + v.servicio + ' ' + fechaVale_(v),
     htmlBody: '<div style="font-family:Arial,sans-serif;font-size:14px;color:#1b2333">' +
       '<p>Hola ' + html_(v.nombre) + ',</p>' +
@@ -519,9 +551,8 @@ function enviarVale_(v) {
       '<tr><td style="padding:8px 12px 0 0;border-top:1px solid #999"><b>Total</b></td>' +
       '<td style="padding:8px 0 0;border-top:1px solid #999;text-align:right"><b>S/ ' + v.total.toFixed(2) + '</b></td></tr></table>' +
       '<p>Código para el comedor: <b style="font-size:18px;color:#1f3864">' + html_(v.codigo) + '</b></p>' +
-      '<p>Adjuntamos tu vale de consumo en PDF.</p></div>'
+      '<p>Adjuntamos la copia de tu vale de consumo en PDF.</p></div>'
   });
-  return 'enviado';
 }
 
 function carpetaVales_(fechaKey) {
