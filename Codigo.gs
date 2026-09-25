@@ -134,7 +134,7 @@ function datosFormulario(fecha) {
     const estado = ahora < s.abre ? 'pronto' : (ahora < s.cierra ? 'abierto' : 'cerrado');
     let motivo = '';
     if (!platos.length) motivo = 'Sin menú programado';
-    else if (!ops.length) motivo = 'Sin precios';
+    else if (!ops.length) motivo = 'Precios por confirmar';
     else if (!platos.some(p => p.quedan == null || p.quedan > 0)) motivo = 'Agotado';
     return {
       nombre: s.nombre, key: s.key, abre: hhmm_(s.abre), cierra: hhmm_(s.cierra),
@@ -328,16 +328,29 @@ function leerOpciones_() {
   const sh = hojaPrecios_(), n = sh.getLastRow()-1, o = Object.create(null), vistos = new Set();
   if (n < 1) return o;
   sh.getRange(2,1,n,7).getValues().forEach(r => {
-    const k = keyS_(r[0]), tipo = String(r[1]).trim(), modalidad = String(r[3]).trim();
-    if (!k || !tipo || keyS_(r[5]) !== 'si' || !['Local','Recojo'].includes(modalidad)) return;
-    if (r[2] === '' || typeof r[2] !== 'number' || !Number.isFinite(r[2]) || r[2] < 0) return;
-    const id = JSON.stringify([k,modalidad,tipo]);
+    const k = keyS_(r[0]), tipo = String(r[1]).trim(), modalidad = modalidad_(r[3]), precio = precio_(r[2]);
+    if (!k || !tipo || !activo_(r[5]) || !modalidad || precio === null) return;
+    const id = JSON.stringify([k,modalidad,keyS_(tipo)]);
     if (vistos.has(id)) throw new Error('Opción duplicada en Precios: ' + r[0] + ' / ' + modalidad + ' / ' + tipo);
     vistos.add(id);
-    (o[k] = o[k] || []).push({tipo:tipo,modalidad:modalidad,precio:Math.round(r[2]*100)/100,incluye:String(r[6] || '')});
+    (o[k] = o[k] || []).push({tipo:tipo,modalidad:modalidad,precio:precio,incluye:String(r[6] || '')});
   });
   return o;
 }
+
+// Tolera precios escritos como texto ("S/ 10,50"), modalidad en minúsculas y Activo como casilla.
+function precio_(v) {
+  if (typeof v === 'string') {
+    const t = v.replace(/s\/|\s/gi, '');
+    v = /^\d+(,\d{1,2})?$/.test(t) ? Number(t.replace(',', '.')) : (/^\d+(\.\d+)?$/.test(t) ? Number(t) : NaN);
+  }
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v * 100) / 100 : null;
+}
+function modalidad_(v) {
+  const k = keyS_(v);
+  return k === 'local' ? 'Local' : (k === 'recojo' || k.includes('llevar')) ? 'Recojo' : '';
+}
+function activo_(v) { return v === true || ['si', 'true', 'x'].includes(keyS_(v)); }
 
 function leerPersonal_() {
   const sh = hojaPrecios_();

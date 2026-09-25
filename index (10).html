@@ -289,17 +289,29 @@ async function cargar(){
   cargando=true;$('cargando').hidden=false;$('cerrado').hidden=true;
   try{
     D=await rpc('datosFormulario');
-    srv=Math.max(0,D.servicios.findIndex(s=>s.disponible));
+    srv=servicioInicial();ajustarModalidad();
     $('personal').innerHTML=D.personal.map(p=>'<button type="button" class="pill" data-v="'+esc(p)+'">'+esc(p)+'</button>').join('');
     pintar();ir(1);
   }catch(e){$('cerTit').textContent='No se pudo cargar el menú';$('motivo').textContent=mensaje(e);$('cerrado').hidden=false;$('pasos').hidden=true;}
   finally{cargando=false;$('cargando').hidden=true;if(D)totales();}
 }
+// Servicio que corresponde a la hora actual: abierto para pedir, luego el que está en horario, luego el próximo.
+function servicioInicial(){
+  const ss=D.servicios;if(D.fechaKey!==D.hoy)return Math.min(srv,Math.max(0,ss.length-1));
+  const i=[s=>s.disponible,s=>s.estado==='abierto',s=>s.estado==='pronto'].map(f=>ss.findIndex(f)).find(i=>i>=0);
+  return i!==undefined?i:Math.max(0,ss.length-1);
+}
+// Si la modalidad elegida no tiene precios pero la otra sí, cambia a la que tiene.
+function ajustarModalidad(){
+  if(!S()||opciones().length)return;
+  const otra=modalidad==='Local'?'Recojo':'Local';
+  if(S().opciones.some(o=>o.modalidad===otra))modalidad=otra;
+}
 function actualizarMenu(){if(enviando||cargando)return;toast('Actualizando menú. Vuelve a seleccionar tus platos.');cambiarFecha(D.fechaKey);}
 async function cambiarFecha(fecha){
   if(enviando)return;
   const turno=++carga;cargando=true;limpiarPedido();$('bSig').disabled=true;
-  try{const d=await rpc('datosFormulario',fecha);if(turno!==carga)return;D=d;pintar();}
+  try{const d=await rpc('datosFormulario',fecha);if(turno!==carga)return;const cambio=!D||D.fechaKey!==d.fechaKey;D=d;if(cambio)srv=servicioInicial();srv=Math.min(srv,Math.max(0,D.servicios.length-1));ajustarModalidad();pintar();}
   catch(e){toast(mensaje(e));$('dia').value=D.fechaKey;}
   finally{if(turno===carga){cargando=false;totales();}}
 }
@@ -315,7 +327,7 @@ function pintar(){
   document.querySelectorAll('#modalidades .pill').forEach(b=>{b.classList.toggle('on',b.dataset.v===modalidad);b.setAttribute('aria-pressed',b.dataset.v===modalidad);});
   pintarPlatos();totales();
 }
-function elegirServicio(i){if(enviando||cargando||i===srv)return;srv=i;limpiarPedido();pintar();}
+function elegirServicio(i){if(enviando||cargando||i===srv)return;srv=i;limpiarPedido();ajustarModalidad();pintar();}
 function elegirModalidad(v){if(enviando||cargando||v===modalidad)return;modalidad=v;limpiarPedido();pintar();}
 function totalPlato(pl){return Object.values(cant[pl]||{}).reduce((a,b)=>a+b,0);}
 function pintarPlatos(){
