@@ -169,7 +169,11 @@ function datosFormulario(fecha) {
 // Recibe el pedido, valida todo con bloqueo y lo guarda
 // Registra el pedido y guarda su vale en PDF en Drive (copia del administrador).
 function enviarPedido(p) {
-  const v = registrarPedido_(p || {});
+  p = p || {};
+  const firma = String(p.firma || '');
+  if (!/^data:image\/png;base64,[A-Za-z0-9+\/=]+$/.test(firma) || firma.length > 300000) throw new Error('Firma tu vale antes de enviar.');
+  const v = registrarPedido_(p);
+  v.firma = firma;
   try { guardarVale_(v); } catch (e) { Logger.log('Vale ' + v.codigo + ': ' + e); }
   return { codigo: v.codigo, servicio: v.servicio, modalidad: v.modalidad, hora: v.hora, nombre: v.nombre,
     registro: v.registro, items: v.items, total: v.total };
@@ -628,7 +632,7 @@ function valePdf_(v) {
     etiquetas.map((et, i) => '<tr><td class="sin" style="border:0;width:150px">' + html_(et) + '</td>' +
       '<td style="text-align:center;font-weight:bold;width:110px">' + (i === usada ? cant : '') + '</td>' +
       '<td style="width:130px">S/ <b>' + (i === usada ? v.total.toFixed(2) : '') + '</b></td>' +
-      '<td style="font-size:8.5pt;color:#444">' + (i === usada ? 'Pedido web · código ' + html_(v.codigo) : '') + '</td></tr>').join('') +
+      '<td style="font-size:8.5pt;color:#444">' + (i === usada ? (v.firma ? '<img src="' + v.firma + '" style="height:34px">' : 'Pedido web · código ' + html_(v.codigo)) : '') + '</td></tr>').join('') +
     '</table>' +
     '<table style="width:100%;margin-top:8px"><tr><td style="width:260px;text-align:right">CONSUMO TOTAL</td>' +
     '<td class="box" style="width:auto;text-align:left;font-size:12pt">S/ ' + v.total.toFixed(2) + '</td></tr></table>' +

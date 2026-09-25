@@ -129,6 +129,8 @@ h2{font-size:17.5px;font-weight:700;letter-spacing:-.01em}
 .copia{margin-top:20px;padding:16px;border-radius:12px;background:var(--claro);text-align:left}
 .copia-f{display:flex;gap:8px}.copia-f input{flex:1;min-width:0}.copia-f .btn{flex:none;padding:12px 18px}
 #copiaMsg.ok{color:var(--verde);font-weight:600}#copiaMsg.no{color:var(--rojo)}
+.firma{display:block;width:100%;height:150px;margin-top:8px;border:1.5px dashed #b9c3d6;border-radius:10px;background:#fff;touch-action:none;cursor:crosshair}
+.f.err .firma{border-color:var(--rojo)}
 .pie{text-align:center;color:var(--sub);font-size:12px;margin-top:18px}
 /* Servicios */
 .srvs{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:8px;margin-top:16px}
@@ -267,6 +269,12 @@ button:focus-visible,select:focus-visible{outline:3px solid #739edf;outline-offs
       <div class="f">
         <label for="obs">Observaciones <span style="color:var(--sub);font-weight:400">(opcional)</span></label>
         <textarea id="obs" maxlength="200" placeholder="Ej. sin cebolla, recojo 12:30"></textarea>
+      </div>
+      <div class="f" id="f-firma">
+        <div class="sec-h"><div class="lab" style="margin:0">Firma <span class="req">*</span></div><button type="button" class="editar" onclick="borrarFirma()">Borrar</button></div>
+        <canvas id="firma" class="firma" aria-label="Dibuja tu firma"></canvas>
+        <p class="hint" style="font-size:12.5px">Firma con tu dedo dentro del recuadro. Se pondrá en tu vale.</p>
+        <div class="msg-err">Firma antes de enviar.</div>
       </div>
     </div>
   </section>
@@ -510,7 +518,7 @@ function ir(n){
   $('pasos').hidden=false;$('barra').hidden=false;$('bAtras').hidden=n===1;$('tot').style.visibility=n===1?'hidden':'visible';
   $('bSig').textContent=n===3?'Enviar pedido':'Continuar';
   document.querySelectorAll('.paso').forEach(e=>{e.classList.toggle('on',+e.dataset.p===n);e.classList.toggle('ok',+e.dataset.p<n);});
-  if(n===3)resumen();totales();window.scrollTo({top:0,behavior:'smooth'});
+  if(n===3){resumen();requestAnimationFrame(prepararFirma);}totales();window.scrollTo({top:0,behavior:'smooth'});
 }
 function atras(){if(!enviando&&!cargando&&paso>1)ir(paso-1);}
 function validarDatos(){
@@ -530,9 +538,10 @@ function ocupado(b){enviando=b;$('bAtras').disabled=b;$('bSig').textContent=b?'E
 async function enviar(){
   if(enviando||!validarDatos())return;
   if(!descuento){$('f-descuento').classList.add('err');toast('Indica si autorizas descuento por planilla.');return;}
+  if(!firmado){$('f-firma').classList.add('err');$('f-firma').scrollIntoView({behavior:'smooth',block:'center'});toast('Firma tu vale antes de enviar.');return;}
   if(descuento==='No'&&!pago){$('f-pago').classList.add('err');toast('Elige cómo vas a pagar.');return;}
   if(!solicitud)solicitud=globalThis.crypto&&crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)+'-'+Math.random().toString(36).slice(2);
-  const pedido={fecha:D.fechaKey,servicio:S().key,modalidad,nombre:$('nombre').value.trim(),registro:$('registro').value.trim(),personal,descuento,pago:descuento==='No'?pago:'',obs:$('obs').value.trim(),solicitud,items:lineas(),
+  const pedido={fecha:D.fechaKey,servicio:S().key,modalidad,nombre:$('nombre').value.trim(),registro:$('registro').value.trim(),personal,descuento,pago:descuento==='No'?pago:'',obs:$('obs').value.trim(),solicitud,firma:firmaPng(),items:lineas(),
     empresa:$('empresa').value.trim(),area:$('area').value.trim()};
   ocupado(true);toast('Registrando tu pedido…');
   try{const r=await rpc('enviarPedido',pedido);listo(r);}
@@ -556,6 +565,28 @@ async function enviarCopia(){
 }
 $('correo').addEventListener('input',()=>$('f-correo').classList.remove('err'));
 $('correo').addEventListener('keydown',e=>{if(e.key==='Enter')enviarCopia();});
+// Recuadro de firma: se dibuja con el dedo o el mouse y se envía como imagen PNG.
+let firmado=false;
+const lienzo=$('firma'),ctx=lienzo.getContext('2d');
+function prepararFirma(){
+  const r=window.devicePixelRatio||1,w=lienzo.clientWidth,h=lienzo.clientHeight;
+  if(!w||lienzo.width===Math.round(w*r))return;
+  lienzo.width=Math.round(w*r);lienzo.height=Math.round(h*r);
+  ctx.setTransform(r,0,0,r,0,0);ctx.lineWidth=2.4;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#1b2333';firmado=false;
+}
+function borrarFirma(){lienzo.width=0;prepararFirma();firmado=false;}
+(()=>{let dib=false,x=0,y=0;
+  const pos=e=>{const b=lienzo.getBoundingClientRect();return [e.clientX-b.left,e.clientY-b.top];};
+  lienzo.addEventListener('pointerdown',e=>{if(enviando)return;prepararFirma();dib=true;[x,y]=pos(e);lienzo.setPointerCapture(e.pointerId);ctx.beginPath();ctx.arc(x,y,1.1,0,7);ctx.fill();});
+  lienzo.addEventListener('pointermove',e=>{if(!dib)return;const [a,b]=pos(e);ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(a,b);ctx.stroke();[x,y]=[a,b];
+    if(!firmado){firmado=true;$('f-firma').classList.remove('err');}});
+  ['pointerup','pointercancel'].forEach(t=>lienzo.addEventListener(t,()=>dib=false));
+})();
+// Reduce la firma a 360 px de ancho para que el PDF pese poco.
+function firmaPng(){
+  const c=document.createElement('canvas');c.width=360;c.height=Math.round(360*lienzo.height/lienzo.width);
+  c.getContext('2d').drawImage(lienzo,0,0,c.width,c.height);return c.toDataURL('image/png');
+}
 function listo(r){
   recordar();clearTimeout(programar.t);clearTimeout(toast.t);$('toast').classList.remove('on');
   ['p1','p2','p3','barra','pasos'].forEach(id=>$(id).hidden=true);
