@@ -62,7 +62,7 @@ function onOpen() {
 function ss_() {
   const id = PropertiesService.getScriptProperties().getProperty('COMEDOR_SS_ID');
   const ss = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActive();
-  if (!ss) throw new Error('Primero ejecuta configurarTodo_ desde la hoja de cálculo.');
+  if (!ss) throw new Error('Primero ejecuta configurarTodo desde Extensiones → Apps Script de la hoja de cálculo.');
   return ss;
 }
 let TZ = null;
@@ -340,7 +340,7 @@ function hoja_(nombre) {
 function hojaPrecios_() {
   let sh = hoja_(HOJA_PRECIOS);
   if (!sh) { configurarPrecios_(); sh = hoja_(HOJA_PRECIOS); }   // Si falta, se crea con los precios por defecto
-  if (!sh) throw new Error('No se encontró la hoja "Precios" en "' + ss_().getName() + '". Ejecuta configurarTodo_ desde esa hoja.');
+  if (!sh) throw new Error('No se encontró la hoja "Precios" en "' + ss_().getName() + '". Ejecuta configurarTodo desde esa hoja.');
   return sh;
 }
 
@@ -921,9 +921,12 @@ function reporteAMozos_() {
 }
 
 // ---------------------------------------------------------------- Configuración
+// Ejecuta esta desde el editor (Correr → configurarTodo). Las funciones que terminan en "_" no aparecen en la lista.
+function configurarTodo() { configurarTodo_(); }
+
 function configurarTodo_() {
   const ss = SpreadsheetApp.getActive();
-  if (!ss) throw new Error('Ejecuta esta función desde Extensiones → Apps Script de tu Google Sheet.');
+  if (!ss) throw new Error('Este proyecto no está vinculado a la hoja. Abre tu Google Sheet → Extensiones → Apps Script, pega ahí el código y ejecuta configurarTodo.');
   PropertiesService.getScriptProperties().setProperty('COMEDOR_SS_ID', ss.getId());
   ss.setSpreadsheetTimeZone('America/Lima'); TZ = null;
   ScriptApp.getProjectTriggers().filter(t => ['alEditar','controlHorario','alEditar_','controlHorario_'].includes(t.getHandlerFunction())).forEach(t => ScriptApp.deleteTrigger(t));
