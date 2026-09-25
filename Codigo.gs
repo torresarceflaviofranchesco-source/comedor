@@ -37,7 +37,8 @@ const PRECIOS_DEF = [
 ];
 const CAB_PED = ['Fecha y hora', 'Código', 'Fecha consumo', 'Servicio', 'Nombre completo', 'Tipo de personal',
   'Registro / DNI', 'Plato', 'Opción', 'Cantidad', 'Precio unit.', 'Subtotal', 'Descuento planilla', 'Observaciones', 'Estado', 'Modalidad', 'Solicitud ID',
-  'Correo', 'Empresa', 'Dpto. / Área', 'Vale PDF'];
+  'Correo', 'Empresa', 'Dpto. / Área', 'Vale PDF', 'Método de pago'];
+const METODOS_PAGO = ['Efectivo', 'Yape', 'Plin', 'Tarjeta'];   // Se pide cuando NO es descuento por planilla
 const COL_CORREO = 18, COL_VALE = 21;           // columnas "Correo" y "Vale PDF" en Pedidos
 const MAX_COPIAS = 5;                           // copias por correo que se pueden pedir de un mismo vale
 
@@ -162,7 +163,7 @@ function datosFormulario(fecha) {
   }).filter(d => d.servicios.length);
 
   return { fecha: hoy.split('-').reverse().join('/'), fechaKey: hoy, hoy: actual, ahora: ahora,
-    semana: semana, servicios: servicios, personal: leerPersonal_(), max: MAX_POR_PERSONA };
+    semana: semana, servicios: servicios, personal: leerPersonal_(), pagos: METODOS_PAGO, max: MAX_POR_PERSONA };
 }
 
 // Recibe el pedido, valida todo con bloqueo y lo guarda
@@ -219,6 +220,8 @@ function registrarPedido_(p) {
     if (!/^[A-Z0-9][A-Z0-9 .-]{3,19}$/.test(registro)) throw new Error('Escribe tu Registro o DNI.');
     if (leerPersonal_().indexOf(personal) < 0) throw new Error('Elige tu tipo de personal.');
     if (!descuento) throw new Error('Indica si el consumo es con descuento por planilla.');
+    const pago = descuento === 'No' ? String(p.pago || '') : '';
+    if (descuento === 'No' && METODOS_PAGO.indexOf(pago) < 0) throw new Error('Elige cómo vas a pagar.');
 
     const s = leerServicios_().filter(x => x.key === keyS_(p.servicio))[0];
     if (!s) throw new Error('Elige un servicio.');
@@ -279,7 +282,7 @@ function registrarPedido_(p) {
     const fechaHora = new Date(), fTxt = hoyTxt_();
     const filas = items.map(i => [fechaHora, codigo, fTxt, s.nombre, nombre, personal, registro, i.plato, i.tipo, i.cant,
       precio[i.tipo], Math.round(i.cant * precio[i.tipo] * 100) / 100, descuento, obs, '', modalidad, solicitud,
-      '', empresa, area, '']);
+      '', empresa, area, '', pago]);
     const sh = hojaPedidos_(), fila = sh.getLastRow() + 1;
     sh.getRange(fila, 1, filas.length, CAB_PED.length).setValues(filas);
     SpreadsheetApp.flush();
@@ -287,7 +290,7 @@ function registrarPedido_(p) {
 
     return comprobante_(items.map((i, n) => ({ hora: fechaHora, codigo: codigo, fecha: hoy, servicio: s.nombre, sKey: s.key,
       nombre: nombre, personal: personal, registro: registro, plato: i.plato, tipo: i.tipo, cant: i.cant, precio: precio[i.tipo],
-      descuento: descuento, obs: obs, modalidad: modalidad, solicitud: solicitud, correo: '', empresa: empresa, area: area,
+      descuento: descuento, obs: obs, modalidad: modalidad, solicitud: solicitud, correo: '', empresa: empresa, area: area, pago: pago,
       vale: '', fila: fila + n })));
   } finally {
     lock.releaseLock();
@@ -507,14 +510,14 @@ function leerLineas_(fecha, incluirAnulados) {
     cant: Number(r[9]) || 0, precio: Number(r[10]) || 0, descuento: String(r[12]), obs: String(r[13]),
     modalidad: String(r[15] || (/llevar/i.test(r[8]) ? 'Recojo' : 'Sin especificar')), solicitud: String(r[16] || ''),
     anulado: String(r[14]).toLowerCase().indexOf('anul') >= 0,
-    correo: String(r[17] || ''), empresa: String(r[18] || ''), area: String(r[19] || ''), vale: String(r[20] || ''), fila: i + 2
+    correo: String(r[17] || ''), empresa: String(r[18] || ''), area: String(r[19] || ''), vale: String(r[20] || ''), pago: String(r[21] || ''), fila: i + 2
   })).filter(l => l.fecha && (!fecha || l.fecha === fecha) && (incluirAnulados || !l.anulado));
 }
 
 function comprobante_(lineas) {
   const l = lineas[0];
   return {codigo:l.codigo, servicio:l.servicio, sKey:l.sKey, modalidad:l.modalidad, nombre:l.nombre, registro:l.registro,
-    hora:Utilities.formatDate(l.hora,tz_(),'dd/MM/yyyy HH:mm'), fechaKey:l.fecha, personal:l.personal, descuento:l.descuento,
+    hora:Utilities.formatDate(l.hora,tz_(),'dd/MM/yyyy HH:mm'), fechaKey:l.fecha, personal:l.personal, descuento:l.descuento, pago:l.pago,
     obs:l.obs, correo:l.correo, empresa:l.empresa, area:l.area, solicitud:l.solicitud, vale:l.vale, filas:lineas.map(i => i.fila),
     items:lineas.map(i => ({plato:i.plato,tipo:i.tipo,cant:i.cant,precio:i.precio,subtotal:Math.round(i.cant*i.precio*100)/100})),
     total:Math.round(lineas.reduce((t,i) => t+i.cant*i.precio,0)*100)/100};
@@ -630,7 +633,8 @@ function valePdf_(v) {
     '<table style="width:100%;margin-top:8px"><tr><td style="width:260px;text-align:right">CONSUMO TOTAL</td>' +
     '<td class="box" style="width:auto;text-align:left;font-size:12pt">S/ ' + v.total.toFixed(2) + '</td></tr></table>' +
     '<table style="margin:6px 0 0 260px"><tr>' + casilla(v.descuento === 'Sí') + '<td>Sujeto a descuento por Planilla</td></tr>' +
-    '<tr>' + casilla(v.descuento === 'No') + '<td>NO sujeto a descuento por Planilla</td></tr></table>' +
+    '<tr>' + casilla(v.descuento === 'No') + '<td>NO sujeto a descuento por Planilla' +
+    (v.pago ? ' &nbsp;·&nbsp; Pago: <b>' + html_(v.pago) + '</b>' : '') + '</td></tr></table>' +
     '<table class="det" style="width:100%;margin-top:10px;border-top:1px dashed #999"><tr><td colspan="2" style="padding-top:6px"><b>Detalle</b> · ' +
     html_(v.servicio) + ' · ' + (v.modalidad === 'Recojo' ? 'Para llevar' : 'Consumo en local') + ' · Registrado ' + html_(v.hora) + '</td></tr>' +
     v.items.map(i => '<tr><td>' + i.cant + ' × ' + html_(i.plato) + ' · ' + html_(i.tipo) + ' (S/ ' + i.precio.toFixed(2) + ')</td>' +

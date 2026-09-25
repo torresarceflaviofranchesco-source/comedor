@@ -259,6 +259,11 @@ button:focus-visible,select:focus-visible{outline:3px solid #739edf;outline-offs
         </div>
         <div class="msg-err">Elige Sí o No.</div>
       </div>
+      <div class="f" id="f-pago" hidden>
+        <div class="lab">¿Cómo vas a pagar? <span class="req">*</span></div>
+        <div class="pills" id="pago"></div>
+        <div class="msg-err">Elige el método de pago.</div>
+      </div>
       <div class="f">
         <label for="obs">Observaciones <span style="color:var(--sub);font-weight:400">(opcional)</span></label>
         <textarea id="obs" maxlength="200" placeholder="Ej. sin cebolla, recojo 12:30"></textarea>
@@ -302,7 +307,7 @@ button:focus-visible,select:focus-visible{outline:3px solid #739edf;outline-offs
 
 <script>
 'use strict';
-let D=null, paso=1, srv=0, modalidad='Local', personal='', descuento='', enviando=false, cargando=false;
+let D=null, paso=1, srv=0, modalidad='Local', personal='', descuento='', pago='', enviando=false, cargando=false;
 let cant=Object.create(null), sel=Object.create(null), solicitud='', carga=0, hecho='';
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -326,10 +331,10 @@ function puedePedir(){return S()&&S().disponible&&opciones().length>0;}
 const LS='comedor.datos';
 const CAMPOS=['nombre','registro','correo','empresa','area'];
 const correoOk=c=>/^[^\s@']+@[^\s@]+\.[^\s@]{2,}$/.test(c);
-function recordar(){try{const d={personal};CAMPOS.forEach(id=>d[id]=$(id).value.trim());localStorage.setItem(LS,JSON.stringify(d));}catch(e){}}
+function recordar(){try{const d={personal,pago};CAMPOS.forEach(id=>d[id]=$(id).value.trim());localStorage.setItem(LS,JSON.stringify(d));}catch(e){}}
 function recuperar(){
   try{const d=JSON.parse(localStorage.getItem(LS)||'null');if(!d)return;
-    CAMPOS.forEach(id=>$(id).value=d[id]||'');personal=d.personal||'';
+    CAMPOS.forEach(id=>$(id).value=d[id]||'');personal=d.personal||'';pago=d.pago||'';
     if(d.nombre)$('p1Hint').textContent='Recordamos tus datos del último pedido. Revísalos y continúa.';
   }catch(e){}
 }
@@ -349,6 +354,8 @@ async function cargar(){
   ['p1','p2','p3','cerrado','barra','pasos'].forEach(id=>$(id).hidden=true);$('cargando').hidden=false;
   try{
     const d=await rpc('datosFormulario');d.recibido=Date.now();D=d;limpiarPedido();
+    $('pago').innerHTML=(D.pagos||[]).map(p=>'<button type="button" class="pill" data-v="'+esc(p)+'">'+esc(p)+'</button>').join('');
+    if(!(D.pagos||[]).includes(pago))pago='';document.querySelectorAll('#pago .pill').forEach(x=>x.classList.toggle('on',x.dataset.v===pago));
     $('personal').innerHTML=D.personal.map(p=>'<button type="button" class="pill" data-v="'+esc(p)+'">'+esc(p)+'</button>').join('');
     if(!D.personal.includes(personal))personal='';marcarPersonal();
     const i=D.servicios.findIndex(s=>s.disponible);
@@ -523,8 +530,9 @@ function ocupado(b){enviando=b;$('bAtras').disabled=b;$('bSig').textContent=b?'E
 async function enviar(){
   if(enviando||!validarDatos())return;
   if(!descuento){$('f-descuento').classList.add('err');toast('Indica si autorizas descuento por planilla.');return;}
+  if(descuento==='No'&&!pago){$('f-pago').classList.add('err');toast('Elige cómo vas a pagar.');return;}
   if(!solicitud)solicitud=globalThis.crypto&&crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)+'-'+Math.random().toString(36).slice(2);
-  const pedido={fecha:D.fechaKey,servicio:S().key,modalidad,nombre:$('nombre').value.trim(),registro:$('registro').value.trim(),personal,descuento,obs:$('obs').value.trim(),solicitud,items:lineas(),
+  const pedido={fecha:D.fechaKey,servicio:S().key,modalidad,nombre:$('nombre').value.trim(),registro:$('registro').value.trim(),personal,descuento,pago:descuento==='No'?pago:'',obs:$('obs').value.trim(),solicitud,items:lineas(),
     empresa:$('empresa').value.trim(),area:$('area').value.trim()};
   ocupado(true);toast('Registrando tu pedido…');
   try{const r=await rpc('enviarPedido',pedido);listo(r);}
@@ -555,7 +563,7 @@ function listo(r){
   hecho=solicitud;$('copiaMsg').textContent='';$('copiaMsg').className='hint';$('bCopia').textContent='Enviar';
   $('okResumen').innerHTML=listaHTML(r.items,r.total);$('listo').hidden=false;window.scrollTo({top:0,behavior:'smooth'});
 }
-['personal','descuento'].forEach(id=>$(id).addEventListener('click',e=>{const b=e.target.closest('.pill');if(!b||enviando)return;if(id==='personal')personal=b.dataset.v;else descuento=b.dataset.v;document.querySelectorAll('#'+id+' .pill').forEach(x=>x.classList.toggle('on',x===b));$('f-'+id).classList.remove('err');solicitud='';}));
+['personal','descuento','pago'].forEach(id=>$(id).addEventListener('click',e=>{const b=e.target.closest('.pill');if(!b||enviando)return;if(id==='personal')personal=b.dataset.v;else if(id==='pago')pago=b.dataset.v;else{descuento=b.dataset.v;$('f-pago').hidden=descuento!=='No';}document.querySelectorAll('#'+id+' .pill').forEach(x=>x.classList.toggle('on',x===b));$('f-'+id).classList.remove('err');solicitud='';}));
 ['nombre','registro','empresa','area','obs'].forEach(id=>$(id).addEventListener('input',()=>{solicitud='';if($('f-'+id))$('f-'+id).classList.remove('err');}));
 recuperar();cargar();
 </script>
