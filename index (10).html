@@ -42,7 +42,7 @@ h2{font-size:17.5px;font-weight:700;letter-spacing:-.01em}
 .f{margin-top:18px}
 .f>label,.f>.lab{display:block;font-size:13.5px;font-weight:600;margin-bottom:7px}
 .f .req{color:var(--rojo)}
-.f input[type=text],.f textarea{width:100%;border:1.5px solid var(--borde);border-radius:10px;padding:12px 13px;font:inherit;font-size:16px;color:var(--texto);background:#fff;transition:border-color .15s,box-shadow .15s}
+.f input[type=text],.f input[type=email],.f textarea{width:100%;border:1.5px solid var(--borde);border-radius:10px;padding:12px 13px;font:inherit;font-size:16px;color:var(--texto);background:#fff;transition:border-color .15s,box-shadow .15s}
 .f textarea{resize:vertical;min-height:70px}
 .f input:focus,.f textarea:focus{outline:none;border-color:var(--azul2);box-shadow:0 0 0 3px rgba(44,76,138,.15)}
 .f.err input,.f.err .pills{border-color:var(--rojo)}
@@ -214,6 +214,19 @@ button:focus-visible,select:focus-visible{outline:3px solid #739edf;outline-offs
       <div class="pills" id="personal"></div>
       <div class="msg-err">Elige una opción.</div>
     </div>
+    <div class="f" id="f-correo">
+      <label for="correo">Correo electrónico <span class="req">*</span></label>
+      <input type="email" id="correo" autocomplete="email" inputmode="email" maxlength="120" placeholder="Ej. juan.perez@empresa.com">
+      <div class="msg-err">Escribe un correo válido: ahí te llega tu vale de consumo.</div>
+    </div>
+    <div class="f">
+      <label for="empresa">Empresa <span style="color:var(--sub);font-weight:400">(opcional)</span></label>
+      <input type="text" id="empresa" autocomplete="organization" maxlength="60" placeholder="Ej. Southern Peru">
+    </div>
+    <div class="f">
+      <label for="area">Dpto. / Sección / Área <span style="color:var(--sub);font-weight:400">(opcional)</span></label>
+      <input type="text" id="area" maxlength="60" placeholder="Ej. Mantenimiento">
+    </div>
   </section>
 
   <!-- Paso 2 -->
@@ -259,6 +272,7 @@ button:focus-visible,select:focus-visible{outline:3px solid #739edf;outline-offs
     <h2>¡Pedido registrado!</h2>
     <p class="hint" id="okHora"></p>
     <div class="codigo" id="okCodigo"></div>
+    <p class="hint" id="okCorreo" style="margin-top:10px;font-weight:600"></p>
     <p class="hint" style="margin-top:8px">Muestra este código al personal del comedor.<br>Puedes tomarle captura a esta pantalla.</p>
     <div id="okResumen" style="text-align:left;margin-top:18px"></div>
   </section>
@@ -300,10 +314,12 @@ function puedePedir(){return S()&&S().disponible&&opciones().length>0;}
 
 // Recuerda los datos del trabajador en este celular para no escribirlos cada vez.
 const LS='comedor.datos';
-function recordar(){try{localStorage.setItem(LS,JSON.stringify({nombre:$('nombre').value.trim(),registro:$('registro').value.trim(),personal}));}catch(e){}}
+const CAMPOS=['nombre','registro','correo','empresa','area'];
+const correoOk=c=>/^[^\s@']+@[^\s@]+\.[^\s@]{2,}$/.test(c);
+function recordar(){try{const d={personal};CAMPOS.forEach(id=>d[id]=$(id).value.trim());localStorage.setItem(LS,JSON.stringify(d));}catch(e){}}
 function recuperar(){
   try{const d=JSON.parse(localStorage.getItem(LS)||'null');if(!d)return;
-    $('nombre').value=d.nombre||'';$('registro').value=d.registro||'';personal=d.personal||'';
+    CAMPOS.forEach(id=>$(id).value=d[id]||'');personal=d.personal||'';
     if(d.nombre)$('p1Hint').textContent='Recordamos tus datos del último pedido. Revísalos y continúa.';
   }catch(e){}
 }
@@ -448,7 +464,7 @@ function ir(n){
 function atras(){if(!enviando&&!cargando&&paso>1)ir(paso-1);}
 function validarDatos(){
   let ok=true;const nombre=$('nombre').value.trim(),reg=$('registro').value.trim();
-  [['nombre',nombre.length>=5&&nombre.split(/\s+/).length>=2],['registro',/^[a-zA-Z0-9][a-zA-Z0-9 .-]{3,19}$/.test(reg)],['personal',!!personal]].forEach(([id,val])=>{$('f-'+id).classList.toggle('err',!val);ok=ok&&val;});
+  [['nombre',nombre.length>=5&&nombre.split(/\s+/).length>=2],['registro',/^[a-zA-Z0-9][a-zA-Z0-9 .-]{3,19}$/.test(reg)],['personal',!!personal],['correo',correoOk($('correo').value.trim().toLowerCase())]].forEach(([id,val])=>{$('f-'+id).classList.toggle('err',!val);ok=ok&&val;});
   if(!ok)toast('Completa los campos marcados.');return ok;
 }
 function siguiente(){if(enviando||cargando)return;if(paso===1){if(validarDatos())ir(2);}else if(paso===2){if(puedePedir()&&lineas().length)ir(3);}else enviar();}
@@ -456,15 +472,17 @@ function listaHTML(items,total){return items.map(l=>'<div class="res-l"><span><s
 function resumen(){
   const ls=lineas();$('resTit').textContent=S().nombre+' · '+(modalidad==='Local'?'Consumo en local':'Para llevar');
   $('resumen').innerHTML=listaHTML(ls,ls.reduce((t,l)=>t+l.cant*l.precio,0));
-  $('resDatos').innerHTML='<dt>Fecha</dt><dd>'+esc(fechaTxt(D.fechaKey))+'</dd><dt>Nombre</dt><dd>'+esc($('nombre').value.trim())+'</dd><dt>Registro / DNI</dt><dd>'+esc($('registro').value.trim())+'</dd><dt>Personal</dt><dd>'+esc(personal)+'</dd>';
+  $('resDatos').innerHTML='<dt>Fecha</dt><dd>'+esc(fechaTxt(D.fechaKey))+'</dd><dt>Nombre</dt><dd>'+esc($('nombre').value.trim())+'</dd><dt>Registro / DNI</dt><dd>'+esc($('registro').value.trim())+'</dd><dt>Personal</dt><dd>'+esc(personal)+'</dd><dt>Correo</dt><dd>'+esc($('correo').value.trim())+'</dd>'+
+    ['empresa','area'].filter(id=>$(id).value.trim()).map(id=>'<dt>'+(id==='empresa'?'Empresa':'Área')+'</dt><dd>'+esc($(id).value.trim())+'</dd>').join('');
 }
 function ocupado(b){enviando=b;$('bAtras').disabled=b;$('bSig').textContent=b?'Enviando…':paso===3?'Enviar pedido':'Continuar';document.querySelectorAll('.editar').forEach(e=>e.disabled=b);totales();}
 async function enviar(){
   if(enviando||!validarDatos())return;
   if(!descuento){$('f-descuento').classList.add('err');toast('Indica si autorizas descuento por planilla.');return;}
   if(!solicitud)solicitud=globalThis.crypto&&crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)+'-'+Math.random().toString(36).slice(2);
-  const pedido={fecha:D.fechaKey,servicio:S().key,modalidad,nombre:$('nombre').value.trim(),registro:$('registro').value.trim(),personal,descuento,obs:$('obs').value.trim(),solicitud,items:lineas()};
-  ocupado(true);
+  const pedido={fecha:D.fechaKey,servicio:S().key,modalidad,nombre:$('nombre').value.trim(),registro:$('registro').value.trim(),personal,descuento,obs:$('obs').value.trim(),solicitud,items:lineas(),
+    correo:$('correo').value.trim(),empresa:$('empresa').value.trim(),area:$('area').value.trim()};
+  ocupado(true);toast('Registrando tu pedido y generando tu vale de consumo…');
   try{const r=await rpc('enviarPedido',pedido);listo(r);}
   catch(e){
     ocupado(false);toast(mensaje(e));
@@ -472,13 +490,15 @@ async function enviar(){
   }
 }
 function listo(r){
-  recordar();clearTimeout(programar.t);
+  recordar();clearTimeout(programar.t);clearTimeout(toast.t);$('toast').classList.remove('on');
   ['p1','p2','p3','barra','pasos'].forEach(id=>$(id).hidden=true);
   $('okCodigo').textContent=r.codigo;$('okHora').textContent=r.servicio+' · '+r.modalidad+' · '+r.nombre+' · '+r.hora;
+  $('okCorreo').textContent=r.envio==='enviado'?'📧 Te enviamos tu vale de consumo en PDF a '+r.correo+'.':
+    'Tu pedido quedó registrado, pero no pudimos enviar el vale a tu correo. Muestra este código en el comedor.';
   $('okResumen').innerHTML=listaHTML(r.items,r.total);$('listo').hidden=false;window.scrollTo({top:0,behavior:'smooth'});
 }
 ['personal','descuento'].forEach(id=>$(id).addEventListener('click',e=>{const b=e.target.closest('.pill');if(!b||enviando)return;if(id==='personal')personal=b.dataset.v;else descuento=b.dataset.v;document.querySelectorAll('#'+id+' .pill').forEach(x=>x.classList.toggle('on',x===b));$('f-'+id).classList.remove('err');solicitud='';}));
-['nombre','registro','obs'].forEach(id=>$(id).addEventListener('input',()=>{solicitud='';if($('f-'+id))$('f-'+id).classList.remove('err');}));
+['nombre','registro','correo','empresa','area','obs'].forEach(id=>$(id).addEventListener('input',()=>{solicitud='';if($('f-'+id))$('f-'+id).classList.remove('err');}));
 recuperar();cargar();
 </script>
 </body>

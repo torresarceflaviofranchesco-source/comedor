@@ -11,7 +11,9 @@ const HOJA_PEDIDOS = 'Pedidos';
 const MAX_POR_PERSONA = 10;          // máximo por opción en un pedido
 const FILAS_MENU = 300;              // filas disponibles para programar el menú
 const AZUL = '#1f3864', AZUL_CLARO = '#dde5f3', GRIS = '#f3f3f3', AMARILLO = '#fffbea';
-const PERSONAL_DEFECTO = ['SPCC', 'Funcionario', 'Empleado'];
+const PERSONAL_DEFECTO = ['SPCC', 'Funcionario', 'Empleado', 'Contratista'];
+const COMEDOR = 'Staff Ilo';                    // Casilla marcada en el vale: 'Staff Ilo' u 'Hospital'
+const CARPETA_VALES = 'Vales de consumo';       // Carpeta (junto a la hoja) donde se guarda cada vale en PDF
 const SERVICIOS_DEF = [['Desayuno', 5, 7], ['Almuerzo', 9, 11], ['Cena', 16, 18]];
 // Servicio, opción, precio con IGV, modalidad, activo. Vacío = pendiente de confirmar.
 const PRECIOS_DEF = [
@@ -32,7 +34,9 @@ const PRECIOS_DEF = [
   ['Rancho caliente', 'Completo', 13.2, 'Local', 'Sí']
 ];
 const CAB_PED = ['Fecha y hora', 'Código', 'Fecha consumo', 'Servicio', 'Nombre completo', 'Tipo de personal',
-  'Registro / DNI', 'Plato', 'Opción', 'Cantidad', 'Precio unit.', 'Subtotal', 'Descuento planilla', 'Observaciones', 'Estado', 'Modalidad', 'Solicitud ID'];
+  'Registro / DNI', 'Plato', 'Opción', 'Cantidad', 'Precio unit.', 'Subtotal', 'Descuento planilla', 'Observaciones', 'Estado', 'Modalidad', 'Solicitud ID',
+  'Correo', 'Empresa', 'Dpto. / Área', 'Vale PDF'];
+const COL_VALE = 21;                            // columna "Vale PDF" en Pedidos
 
 // Panel de control en la hoja Menú (columnas J:L)
 const P = {
@@ -156,8 +160,16 @@ function datosFormulario(fecha) {
 }
 
 // Recibe el pedido, valida todo con bloqueo y lo guarda
+// Registra el pedido y luego genera el vale en PDF: lo guarda en Drive y lo envía al correo del trabajador.
 function enviarPedido(p) {
-  p = p || {};
+  const v = registrarPedido_(p || {});
+  let envio = '';
+  try { envio = enviarVale_(v); } catch (e) { Logger.log('Vale ' + v.codigo + ': ' + e); envio = 'error'; }
+  return { codigo: v.codigo, servicio: v.servicio, modalidad: v.modalidad, hora: v.hora, nombre: v.nombre,
+    registro: v.registro, correo: v.correo, envio: envio, items: v.items, total: v.total };
+}
+
+function registrarPedido_(p) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) throw new Error('Hay muchos pedidos a la vez. Intenta de nuevo en unos segundos.');
   try {
@@ -166,11 +178,14 @@ function enviarPedido(p) {
     const personal = String(p.personal || '');
     const descuento = p.descuento === 'No' ? 'No' : (p.descuento === 'Sí' ? 'Sí' : '');
     const obs = limpiar_(p.obs, 200);
+    const correo = limpiar_(p.correo, 120).toLowerCase();
+    const empresa = limpiar_(p.empresa, 60), area = limpiar_(p.area, 60);
 
     if (nombre.split(/\s+/).length < 2 || nombre.length < 5) throw new Error('Escribe tu nombre completo.');
     if (!/^[A-Z0-9][A-Z0-9 .-]{3,19}$/.test(registro)) throw new Error('Escribe tu Registro o DNI.');
     if (leerPersonal_().indexOf(personal) < 0) throw new Error('Elige tu tipo de personal.');
     if (!descuento) throw new Error('Indica si el consumo es con descuento por planilla.');
+    if (!/^[^\s@']+@[^\s@]+\.[^\s@]{2,}$/.test(correo)) throw new Error('Escribe un correo válido para enviarte tu vale.');
 
     const s = leerServicios_().filter(x => x.key === keyS_(p.servicio))[0];
     if (!s) throw new Error('Elige un servicio.');
@@ -230,19 +245,17 @@ function enviarPedido(p) {
 
     const fechaHora = new Date(), fTxt = hoyTxt_();
     const filas = items.map(i => [fechaHora, codigo, fTxt, s.nombre, nombre, personal, registro, i.plato, i.tipo, i.cant,
-      precio[i.tipo], Math.round(i.cant * precio[i.tipo] * 100) / 100, descuento, obs, '', modalidad, solicitud]);
-    const sh = hojaPedidos_();
-    sh.getRange(sh.getLastRow() + 1, 1, filas.length, CAB_PED.length).setValues(filas);
+      precio[i.tipo], Math.round(i.cant * precio[i.tipo] * 100) / 100, descuento, obs, '', modalidad, solicitud,
+      correo, empresa, area, '']);
+    const sh = hojaPedidos_(), fila = sh.getLastRow() + 1;
+    sh.getRange(fila, 1, filas.length, CAB_PED.length).setValues(filas);
     SpreadsheetApp.flush();
     try { actualizarPanel_(); } catch (e) { Logger.log(e); }
 
-    return {
-      codigo: codigo, servicio: s.nombre, modalidad: modalidad,
-      hora: Utilities.formatDate(fechaHora, tz_(), 'dd/MM/yyyy HH:mm'),
-      nombre: nombre, registro: registro,
-      items: items.map(i => ({ plato: i.plato, tipo: i.tipo, cant: i.cant, subtotal: i.cant * precio[i.tipo] })),
-      total: Math.round(items.reduce((a, i) => a + i.cant * precio[i.tipo], 0) * 100) / 100
-    };
+    return comprobante_(items.map((i, n) => ({ hora: fechaHora, codigo: codigo, fecha: hoy, servicio: s.nombre, sKey: s.key,
+      nombre: nombre, personal: personal, registro: registro, plato: i.plato, tipo: i.tipo, cant: i.cant, precio: precio[i.tipo],
+      descuento: descuento, obs: obs, modalidad: modalidad, solicitud: solicitud, correo: correo, empresa: empresa, area: area,
+      vale: '', fila: fila + n })));
   } finally {
     lock.releaseLock();
   }
@@ -388,7 +401,9 @@ function hojaPedidos_() {
     sh.setColumnWidth(5, 220); sh.setColumnWidth(8, 200); sh.setColumnWidth(9, 220);
     sh.getRange('O1').setNote('Escribe "Anulado" en esta columna para anular una línea: el stock se devuelve.');
   }
-  sh.getRange(1,16,1,2).setValues([['Modalidad','Solicitud ID']]);
+  if (String(sh.getRange(1, CAB_PED.length).getValue()) !== CAB_PED[CAB_PED.length - 1])
+    sh.getRange(1, 16, 1, CAB_PED.length - 15).setValues([CAB_PED.slice(15)]).setFontWeight('bold')
+      .setBackground(AZUL).setFontColor('#ffffff').setWrap(true).setVerticalAlignment('middle');
   return sh;
 }
 
@@ -397,20 +412,22 @@ function leerLineas_(fecha, incluirAnulados) {
   const sh = hojaPedidos_();
   const n = sh.getLastRow() - 1;
   if (n < 1) return [];
-  return sh.getRange(2, 1, n, CAB_PED.length).getValues().map(r => ({
+  return sh.getRange(2, 1, n, CAB_PED.length).getValues().map((r, i) => ({
     hora: r[0], codigo: String(r[1]), fecha: fechaKey_(r[2]), servicio: String(r[3]), sKey: keyS_(r[3]),
     nombre: String(r[4]), personal: String(r[5]), registro: String(r[6]), plato: String(r[7]), tipo: String(r[8]),
     cant: Number(r[9]) || 0, precio: Number(r[10]) || 0, descuento: String(r[12]), obs: String(r[13]),
     modalidad: String(r[15] || (/llevar/i.test(r[8]) ? 'Recojo' : 'Sin especificar')), solicitud: String(r[16] || ''),
-    anulado: String(r[14]).toLowerCase().indexOf('anul') >= 0
+    anulado: String(r[14]).toLowerCase().indexOf('anul') >= 0,
+    correo: String(r[17] || ''), empresa: String(r[18] || ''), area: String(r[19] || ''), vale: String(r[20] || ''), fila: i + 2
   })).filter(l => l.fecha && (!fecha || l.fecha === fecha) && (incluirAnulados || !l.anulado));
 }
 
 function comprobante_(lineas) {
   const l = lineas[0];
-  return {codigo:l.codigo, servicio:l.servicio, modalidad:l.modalidad, nombre:l.nombre,registro:l.registro,
-    hora:Utilities.formatDate(l.hora,tz_(),'dd/MM/yyyy HH:mm'),
-    items:lineas.map(i => ({plato:i.plato,tipo:i.tipo,cant:i.cant,subtotal:Math.round(i.cant*i.precio*100)/100})),
+  return {codigo:l.codigo, servicio:l.servicio, sKey:l.sKey, modalidad:l.modalidad, nombre:l.nombre, registro:l.registro,
+    hora:Utilities.formatDate(l.hora,tz_(),'dd/MM/yyyy HH:mm'), fechaKey:l.fecha, personal:l.personal, descuento:l.descuento,
+    obs:l.obs, correo:l.correo, empresa:l.empresa, area:l.area, solicitud:l.solicitud, vale:l.vale, filas:lineas.map(i => i.fila),
+    items:lineas.map(i => ({plato:i.plato,tipo:i.tipo,cant:i.cant,precio:i.precio,subtotal:Math.round(i.cant*i.precio*100)/100})),
     total:Math.round(lineas.reduce((t,i) => t+i.cant*i.precio,0)*100)/100};
 }
 
@@ -418,6 +435,99 @@ function usados_(lineas) {
   const u = {};
   lineas.forEach(l => { const k = claveUso_(l.fecha, l.sKey, l.plato); u[k] = (u[k] || 0) + l.cant; });
   return u;
+}
+
+// ---------------------------------------------------------------- Vale de consumo (PDF)
+function html_(s) { return String(s == null ? '' : s).replace(/^'/, '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function numeroVale_(v) { return v.fechaKey.replace(/-/g, '') + '-' + v.codigo; }
+function fechaVale_(v) { return v.fechaKey.split('-').reverse().join('/'); }
+
+// Genera el vale una sola vez por pedido: lo guarda en Drive, anota el link en Pedidos y lo envía por correo.
+function enviarVale_(v) {
+  const cache = CacheService.getScriptCache(), clave = 'vale-' + v.solicitud;
+  if (v.vale || cache.get(clave)) return v.correo ? 'enviado' : '';
+  cache.put(clave, '1', 21600);
+  const pdf = valePdf_(v);
+  const archivo = carpetaVales_(v.fechaKey).createFile(pdf);
+  const sh = hojaPedidos_();
+  v.filas.forEach(f => sh.getRange(f, COL_VALE).setValue(archivo.getUrl()));
+  if (!v.correo) return '';
+  if (MailApp.getRemainingDailyQuota() < 1) return 'error';
+  const modo = v.modalidad === 'Recojo' ? 'para llevar' : 'consumo en local';
+  MailApp.sendEmail({
+    to: v.correo, name: 'Comedor Sodexo', attachments: [pdf],
+    subject: 'Vale de consumo N° ' + numeroVale_(v) + ' · ' + v.servicio + ' ' + fechaVale_(v),
+    htmlBody: '<div style="font-family:Arial,sans-serif;font-size:14px;color:#1b2333">' +
+      '<p>Hola ' + html_(v.nombre) + ',</p>' +
+      '<p>Registramos tu pedido de <b>' + html_(v.servicio) + '</b> (' + modo + ') del ' + fechaVale_(v) + '.</p>' +
+      '<table style="border-collapse:collapse;font-size:14px">' + v.items.map(i =>
+        '<tr><td style="padding:4px 12px 4px 0">' + i.cant + ' × ' + html_(i.plato) + ' · ' + html_(i.tipo) + '</td>' +
+        '<td style="padding:4px 0;text-align:right">S/ ' + i.subtotal.toFixed(2) + '</td></tr>').join('') +
+      '<tr><td style="padding:8px 12px 0 0;border-top:1px solid #999"><b>Total</b></td>' +
+      '<td style="padding:8px 0 0;border-top:1px solid #999;text-align:right"><b>S/ ' + v.total.toFixed(2) + '</b></td></tr></table>' +
+      '<p>Código para el comedor: <b style="font-size:18px;color:#1f3864">' + html_(v.codigo) + '</b></p>' +
+      '<p>Adjuntamos tu vale de consumo en PDF.</p></div>'
+  });
+  return 'enviado';
+}
+
+function carpetaVales_(fechaKey) {
+  const padres = DriveApp.getFileById(ss_().getId()).getParents();
+  const padre = padres.hasNext() ? padres.next() : DriveApp.getRootFolder();
+  const buscar = (dentro, nombre) => { const it = dentro.getFoldersByName(nombre); return it.hasNext() ? it.next() : dentro.createFolder(nombre); };
+  return buscar(buscar(padre, CARPETA_VALES), fechaKey.slice(0, 7));   // una subcarpeta por mes: 2026-09
+}
+
+// Mismo formato que el vale impreso: comedor, datos, filas por servicio, total y descuento por planilla.
+function valePdf_(v) {
+  const k = v.sKey, casilla = on => '<td class="box">' + (on ? 'X' : '&nbsp;') + '</td>';
+  const cant = v.items.reduce((t, i) => t + i.cant, 0);
+  const filasSrv = [['Desayuno', /^desayuno/], ['Almuerzo', /^almuerzo/], ['Cena', /^cena/], ['Rancho', /rancho/]];
+  let usada = filasSrv.findIndex(f => f[1].test(k));
+  const etiquetas = filasSrv.map(f => f[0]).concat([usada < 0 ? v.servicio : '']);
+  if (usada < 0) usada = 4;
+  const linea = (et, val) => '<tr><td class="et">' + et + '</td><td class="lin">' + html_(val) + '</td></tr>';
+  const personal = ['SPCC', 'Funcionario', 'Empleado', 'Contratista'];
+  const html = '<html><head><meta charset="utf-8"><style>' +
+    'body{font-family:Arial,Helvetica,sans-serif;font-size:11pt;color:#111}' +
+    'table{border-collapse:collapse}td{padding:3px 5px;vertical-align:middle}' +
+    '.vale{border:1.5px solid #333;padding:10px 16px}' +
+    '.logo{font-size:24pt;font-weight:bold;font-style:italic;color:#2a295c}' +
+    '.tit{font-size:17pt;font-style:italic;text-align:center}.num{font-size:17pt;text-align:right;white-space:nowrap}' +
+    '.box{border:1px solid #333;width:24px;height:16px;text-align:center;font-weight:bold;font-size:10pt}' +
+    '.et{width:170px;white-space:nowrap}.lin{border-bottom:1px solid #333;font-weight:bold}' +
+    '.g td{border:1px solid #333;height:22px}.g .sin{border:0}.g th{font-size:11pt;padding:3px}' +
+    '.det{font-size:9.5pt;color:#333}.det td{padding:1px 6px 1px 0}' +
+    '</style></head><body><div class="vale">' +
+    '<table style="width:100%"><tr><td class="logo">sodexo</td><td></td>' +
+    '<td style="text-align:right">Fecha&nbsp;</td><td class="box" style="width:130px;font-size:11pt">' + fechaVale_(v) + '</td></tr></table>' +
+    '<table style="width:100%"><tr><td style="width:190px"><table>' +
+    '<tr><td>Comedor Staff Ilo</td>' + casilla(COMEDOR === 'Staff Ilo') + '</tr>' +
+    '<tr><td>Comedor Hospital</td>' + casilla(COMEDOR === 'Hospital') + '</tr></table></td>' +
+    '<td class="tit">VALE DE CONSUMO</td><td class="num">N° ' + html_(numeroVale_(v)) + '</td></tr></table>' +
+    '<table style="width:100%;margin-top:6px">' + linea('Nombre:', v.nombre) +
+    '<tr><td></td><td><table style="margin:3px 0"><tr>' + personal.map(p => '<td>' + p + '</td>' + casilla(keyS_(p) === keyS_(v.personal))).join('<td>&nbsp;&nbsp;</td>') +
+    (personal.some(p => keyS_(p) === keyS_(v.personal)) ? '' : '<td>&nbsp;&nbsp;' + html_(v.personal) + '</td>' + casilla(true)) + '</tr></table></td></tr>' +
+    linea('Registro/DNI:', v.registro) + linea('Empresa:', v.empresa) +
+    linea('Dpto. / Sección / Área:', v.area) + linea('Cuenta:', '') + '</table>' +
+    '<table class="g" style="width:100%;margin-top:10px"><tr><th class="sin" style="border:0"></th><th>Cant.</th><th>Precio S/</th><th>Firma</th></tr>' +
+    etiquetas.map((et, i) => '<tr><td class="sin" style="border:0;width:150px">' + html_(et) + '</td>' +
+      '<td style="text-align:center;font-weight:bold;width:110px">' + (i === usada ? cant : '') + '</td>' +
+      '<td style="width:130px">S/ <b>' + (i === usada ? v.total.toFixed(2) : '') + '</b></td>' +
+      '<td style="font-size:8.5pt;color:#444">' + (i === usada ? 'Pedido web · código ' + html_(v.codigo) : '') + '</td></tr>').join('') +
+    '</table>' +
+    '<table style="width:100%;margin-top:8px"><tr><td style="width:260px;text-align:right">CONSUMO TOTAL</td>' +
+    '<td class="box" style="width:auto;text-align:left;font-size:12pt">S/ ' + v.total.toFixed(2) + '</td></tr></table>' +
+    '<table style="margin:6px 0 0 260px"><tr>' + casilla(v.descuento === 'Sí') + '<td>Sujeto a descuento por Planilla</td></tr>' +
+    '<tr>' + casilla(v.descuento === 'No') + '<td>NO sujeto a descuento por Planilla</td></tr></table>' +
+    '<table class="det" style="width:100%;margin-top:10px;border-top:1px dashed #999"><tr><td colspan="2" style="padding-top:6px"><b>Detalle</b> · ' +
+    html_(v.servicio) + ' · ' + (v.modalidad === 'Recojo' ? 'Para llevar' : 'Consumo en local') + ' · Registrado ' + html_(v.hora) + '</td></tr>' +
+    v.items.map(i => '<tr><td>' + i.cant + ' × ' + html_(i.plato) + ' · ' + html_(i.tipo) + ' (S/ ' + i.precio.toFixed(2) + ')</td>' +
+      '<td style="text-align:right">S/ ' + i.subtotal.toFixed(2) + '</td></tr>').join('') +
+    (v.obs ? '<tr><td colspan="2">Obs.: ' + html_(v.obs) + '</td></tr>' : '') +
+    '</table></div></body></html>';
+  return Utilities.newBlob(html, MimeType.HTML, 'vale.html').getAs(MimeType.PDF)
+    .setName('Vale ' + numeroVale_(v) + ' - ' + String(v.nombre).replace(/^'/, '').replace(/[\\/:*?"<>|]/g, '') + '.pdf');
 }
 
 // ---------------------------------------------------------------- Link
