@@ -52,6 +52,7 @@ function onOpen() {
     .addItem('📄 Reporte para mozos (PDF)', 'reporteAMozos_')
     .addItem('🔗 Ver link de pedidos', 'verLink_')
     .addItem('🥗 Agregar platos nuevos a "Platos"', 'agregarPlatos_')
+    .addItem('🧪 Cargar menú de ejemplo (21–27/09)', 'cargarMenuEjemplo')
     .addSeparator()
     .addItem('Recalcular pedidos ahora', 'actualizarStock_')
     .addItem('Reparar diseño y activadores', 'configurarTodo_')
@@ -918,6 +919,82 @@ function reporteAMozos_() {
     estado.setValue('❌ Error: ' + e.message).setFontColor('#990000');
     aviso_('❌ ' + e.message);
   }
+}
+
+
+// ---------------------------------------------------------------- Menú de ejemplo (semana del 21 al 27/09/2026)
+// Platos de fondo del menú semanal impreso. Cada día: [platos..., acompañamiento].
+const MENU_EJEMPLO = {
+  'Desayuno': [
+    [['Pollo a la cacerola'], 'Papa sancochada'],
+    [['Arroz a la jardinera con cerdo'], 'Ensalada fresca'],
+    [['Sarza de atún'], 'Papa sancochada'],
+    [['Papa arrebozada'], ''],
+    [['Revuelto de verduras'], 'Camote sancochado'],
+    [['Lomito al jugo'], 'Papa sancochada'],
+    [['Omelette'], '']
+  ],
+  'Almuerzo': [
+    [['Arroz con pollo', 'Lomo saltado'], 'Sarza criolla, papas fritas y arroz blanco'],
+    [['Ají de pollo', 'Asado de res'], 'Puré de papa y arroz blanco'],
+    [['Carapulcra de cerdo', 'Pollo guisado'], 'Camote sancochado y arroz blanco'],
+    [['Pollo oriental', 'Picante a la tacneña'], 'Sarza criolla y arroz blanco'],
+    [['Pollo al perejil', 'Albóndigas a la boloñesa'], 'Yuca sancochada, tallarín rojo y arroz blanco'],
+    [['Pollo al romero', 'Pescado frito'], 'Papa sancochada, ensalada fresca y arroz blanco'],
+    [['Pollo al horno', 'Cerdo al horno'], 'Papa al horno, frejoles y arroz blanco']
+  ],
+  'Cena': [
+    [['Pollo a la naranja', 'Tallarín saltado con res'], 'Camote sancochado y arroz blanco'],
+    [['Saltado de mollejitas', 'Pollo al sillao'], 'Papas fritas y arroz con perejil'],
+    [['Asado de pollo', 'Pescado al horno'], 'Papa al horno, camote sancochado y arroz blanco'],
+    [['Cerdo agridulce', 'Pollo a la mostaza'], 'Puré de camote, papa sancochada y arroz blanco'],
+    [['Pollo tipo parrilla', 'Guiso de fideo con res'], 'Papa sancochada y arroz blanco'],
+    [['Cerdo al horno', 'Revuelto de verduras'], 'Camote sancochado y arroz blanco'],
+    [['Pollo a la plancha', 'Arroz tapado'], 'Papa sancochada y arroz blanco']
+  ],
+  'Rancho caliente': [
+    [['Lentejita guisada con cerdo'], 'Arroz blanco · fruta mandarina'],
+    [['Pollo al horno'], 'Papa sancochada, arroz blanco · pudín de fruta'],
+    [['Cerdo al horno'], 'Camote sancochado, arroz blanco · mazamorra morada'],
+    [['Pollo arvejado'], 'Papa sancochada, arroz blanco · compota de fruta'],
+    [['Matasquita de res'], 'Arroz blanco · fruta manzana delicia'],
+    [['Pollo al romero'], 'Papa sancochada, arroz blanco · fruta mandarina'],
+    [['Chuleta de cerdo'], 'Papas fritas, arroz blanco · fruta manzana israel']
+  ]
+};
+
+// Ejecuta esta desde el editor (Correr → cargarMenuEjemplo). No duplica filas si se ejecuta dos veces.
+function cargarMenuEjemplo() {
+  const sh = hojaMenu_(), servicios = leerServicios_();
+  const existentes = new Set(leerMenuTodo_().map(m => claveUso_(m.fecha, m.sKey, m.plato)));
+  const col = sh.getRange(2, 3, FILAS_MENU, 1).getValues();
+  let libre = col.length; while (libre > 0 && !String(col[libre - 1][0]).trim()) libre--;
+  const filas = [], faltan = [], ingredientes = {};
+  Object.keys(MENU_EJEMPLO).forEach(nombre => {
+    const s = servicios.filter(x => x.key === keyS_(nombre))[0];
+    if (!s) { faltan.push(nombre); return; }
+    MENU_EJEMPLO[nombre].forEach((dia, i) => {
+      const fecha = new Date(2026, 8, 21 + i, 12), fk = '2026-09-' + (21 + i);
+      dia[0].forEach(plato => {
+        if (!ingredientes[keyS_(plato)] && dia[1]) ingredientes[keyS_(plato)] = dia[1];
+        if (!existentes.has(claveUso_(fk, s.key, plato))) filas.push([fecha, s.nombre, plato, 30]);
+      });
+    });
+  });
+  if (libre + filas.length > FILAS_MENU) throw new Error('No hay filas libres suficientes en la hoja Menú.');
+  if (filas.length) sh.getRange(libre + 2, 1, filas.length, 4).setValues(filas);
+
+  // Acompañamientos en la hoja Platos (solo donde está vacío)
+  sincronizarPlatos_();
+  const hp = hojaPlatos_(), n = hp.getLastRow() - 1;
+  if (n > 0) {
+    const v = hp.getRange(2, 1, n, 2).getValues();
+    v.forEach(r => { if (!String(r[1]).trim() && ingredientes[keyS_(r[0])]) r[1] = ingredientes[keyS_(r[0])]; });
+    hp.getRange(2, 2, n, 1).setValues(v.map(r => [r[1]]));
+  }
+  actualizarStock_();
+  aviso_('✅ Se agregaron ' + filas.length + ' platos del 21 al 27/09/2026 (stock 30 cada uno).' +
+    (faltan.length ? '\n\n⚠️ No se cargó: ' + faltan.join(', ') + '. Agrégalo en el panel (columna J de Menú) con su horario y vuelve a ejecutar.' : ''));
 }
 
 // ---------------------------------------------------------------- Configuración
