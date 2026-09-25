@@ -297,7 +297,7 @@ function registrarPedido_(p) {
 // ---------------------------------------------------------------- Lectura de hojas
 function hojaMenu_() {
   const ss = ss_();
-  return ss.getSheetByName(HOJA_MENU) || ss.insertSheet(HOJA_MENU, 0);
+  return hoja_(HOJA_MENU) || ss.insertSheet(HOJA_MENU, 0);
 }
 
 function leerServicios_() {
@@ -331,9 +331,16 @@ function unicos_(menu) {
   });
 }
 
+// Busca una hoja sin distinguir mayúsculas, tildes ni espacios ("PRECIOS", "Precios ").
+function hoja_(nombre) {
+  const ss = ss_(), k = keyS_(nombre).replace(/\s+/g, '');
+  return ss.getSheetByName(nombre) || ss.getSheets().filter(h => keyS_(h.getName()).replace(/\s+/g, '') === k)[0] || null;
+}
+
 function hojaPrecios_() {
-  const sh = ss_().getSheetByName(HOJA_PRECIOS);
-  if (!sh) throw new Error('Ejecuta configurarTodo_ antes de abrir el formulario.');
+  let sh = hoja_(HOJA_PRECIOS);
+  if (!sh) { configurarPrecios_(); sh = hoja_(HOJA_PRECIOS); }   // Si falta, se crea con los precios por defecto
+  if (!sh) throw new Error('No se encontró la hoja "Precios" en "' + ss_().getName() + '". Ejecuta configurarTodo_ desde esa hoja.');
   return sh;
 }
 
@@ -345,8 +352,9 @@ function opcionBase_(tipo) {
 
 function configurarPrecios_() {
   const ss = ss_();
-  let sh = ss.getSheetByName(HOJA_PRECIOS);
+  let sh = hoja_(HOJA_PRECIOS);
   if (!sh) sh = ss.insertSheet(HOJA_PRECIOS);
+  else if (sh.getName() !== HOJA_PRECIOS) sh.setName(HOJA_PRECIOS);
   if (sh.getLastRow() && String(sh.getRange('A1').getValue()).trim() !== 'Servicio') {
     // Conserva íntegra cualquier estructura más antigua.
     let name = 'Precios (anterior)', i = 2;
@@ -410,7 +418,7 @@ const CAB_PLATOS = ['Plato', 'Ingredientes / acompañamiento', 'Kcal', 'Proteín
 
 function hojaPlatos_() {
   const ss = ss_();
-  let sh = ss.getSheetByName(HOJA_PLATOS);
+  let sh = hoja_(HOJA_PLATOS);
   if (sh) return sh;
   sh = ss.insertSheet(HOJA_PLATOS);
   sh.getRange(1, 1, 1, CAB_PLATOS.length).setValues([CAB_PLATOS]).setFontWeight('bold')
@@ -426,7 +434,7 @@ function hojaPlatos_() {
 
 // Clave del plato → ficha. Se busca sin distinguir mayúsculas ni tildes.
 function leerPlatos_() {
-  const sh = ss_().getSheetByName(HOJA_PLATOS), out = Object.create(null);
+  const sh = hoja_(HOJA_PLATOS), out = Object.create(null);
   if (!sh || sh.getLastRow() < 2) return out;
   const num = v => (v === '' || v == null || !Number.isFinite(Number(v))) ? null : Math.round(Number(v));
   sh.getRange(2, 1, sh.getLastRow() - 1, CAB_PLATOS.length).getValues().forEach(r => {
@@ -462,7 +470,7 @@ function leerPersonal_() {
 
 function hojaPedidos_() {
   const ss = ss_();
-  let sh = ss.getSheetByName(HOJA_PEDIDOS);
+  let sh = hoja_(HOJA_PEDIDOS);
   if (sh && String(sh.getRange(1, 3).getValue()) !== CAB_PED[2]) {
     // Formato anterior: se guarda aparte y se crea la hoja nueva
     let nombre = 'Pedidos (anterior)', i = 2;
