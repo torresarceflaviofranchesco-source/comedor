@@ -43,13 +43,12 @@ const MAX_COPIAS = 5;                           // copias por correo que se pued
 
 // Panel de control en la hoja Menú (columnas J:L)
 const P = {
-  LINK: 'K2', SRV_INI: 4, SRV_FIN: 8, VENTA: 'K9', ESTADO: 'K10',
-  REP_FILA: 13, REP_MSG: 'J16', REP_LINK: 'J17'
+  LINK: 'K2', SRV_INI: 4, SRV_FIN: 8, VENTA: 'K9', ESTADO: 'K10', CARPETA: 'K12'
 };
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('🍽️ Comedor')
-    .addItem('📄 Reporte para mozos (PDF)', 'reporteAMozos_')
+    .addItem('📂 Abrir carpeta de vales (PDF)', 'abrirCarpetaVales_')
     .addItem('🔗 Ver link de pedidos', 'verLink_')
     .addItem('🥗 Agregar platos nuevos a "Platos"', 'agregarPlatos_')
     .addItem('🧪 Cargar menú de ejemplo (21–27/09)', 'cargarMenuEjemplo')
@@ -564,11 +563,30 @@ function correoVale_(v, correo, pdf) {
   });
 }
 
-function carpetaVales_(fechaKey) {
+function buscarCarpeta_(dentro, nombre) { const it = dentro.getFoldersByName(nombre); return it.hasNext() ? it.next() : dentro.createFolder(nombre); }
+
+// Carpeta "Vales de consumo" junto a la hoja de cálculo.
+function carpetaValesRaiz_() {
   const padres = DriveApp.getFileById(ss_().getId()).getParents();
-  const padre = padres.hasNext() ? padres.next() : DriveApp.getRootFolder();
-  const buscar = (dentro, nombre) => { const it = dentro.getFoldersByName(nombre); return it.hasNext() ? it.next() : dentro.createFolder(nombre); };
-  return buscar(buscar(padre, CARPETA_VALES), fechaKey.slice(0, 7));   // una subcarpeta por mes: 2026-09
+  return buscarCarpeta_(padres.hasNext() ? padres.next() : DriveApp.getRootFolder(), CARPETA_VALES);
+}
+
+function carpetaVales_(fechaKey) { return buscarCarpeta_(carpetaValesRaiz_(), fechaKey.slice(0, 7)); }   // subcarpeta por mes: 2026-09
+
+// Link "Abrir carpeta" en el panel de la hoja Menú.
+function linkCarpeta_(sh) {
+  const url = carpetaValesRaiz_().getUrl();
+  sh.getRange(P.CARPETA).setRichTextValue(SpreadsheetApp.newRichTextValue().setText('Abrir carpeta ↗').setLinkUrl(url).build())
+    .setFontWeight('bold');
+  return url;
+}
+
+function abrirCarpetaVales_() {
+  const url = linkCarpeta_(hojaMenu_());
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(
+    '<div style="font-family:Arial;padding:6px"><p style="margin:0 0 12px">Aquí se guardan los vales en PDF, en una subcarpeta por mes.</p>' +
+    '<a href="' + url + '" target="_blank" style="display:inline-block;background:#1f3864;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;font-weight:bold">📂 Abrir carpeta de vales</a></div>' +
+    '<script>window.open(' + JSON.stringify(url) + ',"_blank");</script>').setWidth(380).setHeight(130), 'Vales de consumo');
 }
 
 // Mismo formato que el vale impreso: comedor, datos, filas por servicio, total y descuento por planilla.
@@ -807,10 +825,10 @@ function disenarHoja_() {
   sh.getRange('J9:J10').setBackground(AZUL_CLARO);
   sh.getRange('J2:L10').setBorder(true, true, true, true, true, true, '#b7c4de', SpreadsheetApp.BorderStyle.SOLID);
 
-  sh.getRange('J12').setValue('📄 REPORTE PARA MOZOS').setFontWeight('bold');
-  sh.setRowHeight(P.REP_FILA, 30);
-  sh.setRowHeight(P.REP_FILA + 1, 30);
-  sh.getRange(P.REP_MSG).setValue('Menú 🍽️ Comedor → Reporte para mozos (PDF)').setFontColor('#666666');
+  sh.getRange('J12').setValue('📂 Vales de consumo (PDF)').setFontWeight('bold').setBackground(AZUL_CLARO);
+  sh.getRange('K12:L12').merge();
+  try { linkCarpeta_(sh); } catch (e) { Logger.log(e); }
+  sh.getRange('J12:L12').setBorder(true, true, true, true, true, true, '#b7c4de', SpreadsheetApp.BorderStyle.SOLID);
 
   sh.getRange('J19:L19').merge().setValue('ℹ️ CÓMO USARLO').setFontWeight('bold').setBackground(GRIS);
   sh.getRange('J20:L27').merge().setWrap(true).setVerticalAlignment('top').setBackground(GRIS).setValue(
@@ -818,109 +836,8 @@ function disenarHoja_() {
     '2. Cada servicio abre y cierra solo según su horario (tabla de arriba). El formulario muestra los platos de hoy.\n' +
     '3. Las opciones y precios de cada servicio (completo, económico, segundo) están en la hoja "Precios".\n' +
     '4. Modalidad Local/Recojo, Activo e Incluye se editan también en Precios. Los pedidos llegan a la hoja "Pedidos". Para anular uno, escribe "Anulado" en la columna Estado.\n' +
-    '5. Pulsa "Reporte para mozos (PDF)" para descargar los pedidos de hoy.');
+    '5. Cada pedido genera su vale en PDF. Ábrelos con el link "Abrir carpeta" (K12) o en Menú 🍽️ Comedor → Abrir carpeta de vales.');
 }
-
-// ---------------------------------------------------------------- Reporte para mozos (PDF)
-function construirPdf_(lineas) {
-  const doc = DocumentApp.create('tmp-reporte-mozos');
-  const body = doc.getBody();
-  body.setPageWidth(842).setPageHeight(595).setMarginTop(28).setMarginBottom(28).setMarginLeft(28).setMarginRight(28);
-
-  const estilo = (tabla, nCols) => {
-    tabla.setBorderWidth(0.5).setBorderColor('#999999');
-    for (let r = 0; r < tabla.getNumRows(); r++) {
-      for (let c = 0; c < nCols; c++) tabla.getCell(r, c).setPaddingTop(2).setPaddingBottom(2).editAsText().setFontSize(9);
-    }
-    for (let c = 0; c < nCols; c++) tabla.getCell(0, c).setBackgroundColor(AZUL).editAsText().setBold(true).setForegroundColor('#ffffff');
-  };
-
-  const opciones = leerOpciones_();
-  const orden = leerServicios_().map(s => s.key);
-  const grupos = {};
-  lineas.forEach(l => (grupos[l.sKey] = grupos[l.sKey] || []).push(l));
-  const claves = Object.keys(grupos).sort((a, b) => (orden.indexOf(a) + 1 || 99) - (orden.indexOf(b) + 1 || 99));
-
-  body.appendParagraph('Reporte de pedidos – Comedor SODEXO').setHeading(DocumentApp.ParagraphHeading.HEADING1);
-  body.appendParagraph(fechaLarga_(new Date()) + '   ·   Generado: ' + Utilities.formatDate(new Date(), tz_(), 'dd/MM/yyyy HH:mm'))
-    .setFontSize(9).setForegroundColor('#666666');
-
-  claves.forEach((k, idx) => {
-    const filas = grupos[k].map(f => Object.assign({}, f, {tipo: f.modalidad + ' · ' + f.tipo}));
-    if (idx > 0) body.appendPageBreak();
-    body.appendParagraph(filas[0].servicio.toUpperCase()).setHeading(DocumentApp.ParagraphHeading.HEADING2);
-
-    const tipos = [];
-    filas.forEach(f => { if (tipos.indexOf(f.tipo) < 0) tipos.push(f.tipo); });
-    const res = {};
-    filas.forEach(f => { res[f.plato] = res[f.plato] || {}; res[f.plato][f.tipo] = (res[f.plato][f.tipo] || 0) + f.cant; });
-    const tot = tipos.map(() => 0);
-    const datosRes = Object.keys(res).sort().map(p => {
-      const fila = tipos.map((t, i) => { const v = res[p][t] || 0; tot[i] += v; return v; });
-      return [p].concat(fila.map(String)).concat([String(fila.reduce((a, b) => a + b, 0))]);
-    });
-    datosRes.push(['TOTAL'].concat(tot.map(String)).concat([String(tot.reduce((a, b) => a + b, 0))]));
-    const cabRes = ['Plato'].concat(tipos).concat(['TOTAL']);
-    const tRes = body.appendTable([cabRes].concat(datosRes));
-    estilo(tRes, cabRes.length);
-    tRes.getRow(tRes.getNumRows() - 1).editAsText().setBold(true);
-
-    body.appendParagraph('Detalle').setHeading(DocumentApp.ParagraphHeading.HEADING3);
-    const cab = ['Código', 'Nombre', 'Registro / DNI', 'Personal', 'Plato', 'Opción', 'Cant.', 'Desc. planilla', 'Obs.', 'Entregado'];
-    const datos = filas.map(f => [f.codigo, f.nombre, f.registro, f.personal, f.plato, f.tipo,
-      String(f.cant), f.descuento, f.obs || '', '☐']);
-    estilo(body.appendTable([cab].concat(datos)), cab.length);
-  });
-
-  doc.saveAndClose();
-  const archivoDoc = DriveApp.getFileById(doc.getId());
-  const pdf = archivoDoc.getAs(MimeType.PDF);
-  archivoDoc.setTrashed(true);
-  return pdf;
-}
-
-function carpetaReportes_() {
-  const padres = DriveApp.getFileById(ss_().getId()).getParents();
-  const padre = padres.hasNext() ? padres.next() : DriveApp.getRootFolder();
-  const it = padre.getFoldersByName('Reportes Mozos');
-  return it.hasNext() ? it.next() : padre.createFolder('Reportes Mozos');
-}
-
-function reporteAMozos_() {
-  const sh = hojaMenu_();
-  const estado = sh.getRange(P.REP_MSG);
-  try {
-    const filas = leerLineas_(hoyKey_(), false).sort((a, b) =>
-      a.servicio.localeCompare(b.servicio) || a.plato.localeCompare(b.plato) || a.tipo.localeCompare(b.tipo) || a.nombre.localeCompare(b.nombre));
-    if (!filas.length) { aviso_('Todavía no hay pedidos registrados hoy.'); return; }
-
-    const nombre = 'Reporte Mozos ' + Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH-mm') + '.pdf';
-    const pdf = construirPdf_(filas).setName(nombre);
-    const archivo = carpetaReportes_().createFile(pdf);
-    // El reporte conserva los permisos de Drive del administrador.
-
-    estado.setValue('✅ Último reporte: ' + Utilities.formatDate(new Date(), tz_(), 'dd/MM HH:mm') + ' (' + filas.length + ' líneas)')
-      .setFontColor('#274e13');
-    sh.getRange(P.REP_LINK).setValue(archivo.getUrl());
-
-    const b64 = Utilities.base64Encode(pdf.getBytes());
-    const urlDescarga = 'https://drive.google.com/uc?export=download&id=' + archivo.getId();
-    const html = HtmlService.createHtmlOutput(
-      '<div style="font-family:Arial;padding:6px">' +
-      '<p style="margin:0 0 10px">✅ Reporte listo: <b>' + filas.length + '</b> líneas de pedido.</p>' +
-      '<a id="d" download="' + nombre + '" href="data:application/pdf;base64,' + b64 + '" ' +
-      'style="display:inline-block;background:#1f3864;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;font-weight:bold">⬇ Descargar PDF</a>' +
-      '<p style="font-size:12px;color:#555;margin-top:12px">Si no se descarga: <a href="' + urlDescarga + '" target="_blank">descargar desde Drive</a>' +
-      ' · <a href="' + archivo.getUrl() + '" target="_blank">ver / compartir con mozos</a></p>' +
-      '</div><script>setTimeout(function(){document.getElementById("d").click();},300);</script>'
-    ).setWidth(420).setHeight(170);
-    SpreadsheetApp.getUi().showModalDialog(html, 'Reporte para mozos');
-  } catch (e) {
-    estado.setValue('❌ Error: ' + e.message).setFontColor('#990000');
-    aviso_('❌ ' + e.message);
-  }
-}
-
 
 // ---------------------------------------------------------------- Menú de ejemplo (semana del 21 al 27/09/2026)
 // Platos de fondo del menú semanal impreso. Cada día: [platos..., acompañamiento].
